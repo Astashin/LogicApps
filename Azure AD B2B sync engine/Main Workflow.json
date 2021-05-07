@@ -1,0 +1,267 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Get_application_configuration": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Tables/@{encodeURIComponent('ApplicationConfiguration')}/entities(PartitionKey='@{encodeURIComponent('B2B')}',RowKey='@{encodeURIComponent('1')}')"
+                },
+                "runAfter": {
+                    "Initialize_variable_LoggingArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Get_remote_AAD_tenants_configuration": {
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Tables/@{encodeURIComponent('RemoteTenantConfiguration')}/entities"
+                },
+                "runAfter": {
+                    "Get_application_configuration": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Initialize_variable_LoggingArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "LoggingArray",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {},
+                "type": "InitializeVariable"
+            },
+            "Main_loop_for_all_remote_tenants": {
+                "actions": {
+                    "Skip_disabled_configuration": {
+                        "actions": {
+                            "If_attribute_sync_is_enabled": {
+                                "actions": {
+                                    "Run_B2B_Sync_Worker": {
+                                        "inputs": {
+                                            "body": {
+                                                "ApplicationId": "@{item()?['ApplicationId']}",
+                                                "AttributeSyncExclusion": "@{item()?['AttributeSyncExclusion']}",
+                                                "DestinationTenantPrimaryDomain": "@{body('Get_application_configuration')?['DestinationTenantPrimaryDomain']}",
+                                                "KeyVaultURL": "@{body('Get_application_configuration')?['KeyVaultURL']}",
+                                                "SyncedAttributes": "@{item()?['SyncedAttributes']}",
+                                                "TenantId": "@{item()?['TenantId']}"
+                                            },
+                                            "host": {
+                                                "triggerName": "manual",
+                                                "workflow": {
+                                                    "id": "/subscriptions/<subscriptionid>/resourceGroups/<resource_Group_ID>/providers/Microsoft.Logic/workflows/Attribute-Sync-Worker"
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {},
+                                        "type": "Workflow"
+                                    },
+                                    "Save_attribute_sync_output_to_Logging_Array": {
+                                        "actions": {
+                                            "Append_sync_output_to_Logging_Array": {
+                                                "inputs": {
+                                                    "name": "LoggingArray",
+                                                    "value": {
+                                                        "Action": "@{item()?['Action']}",
+                                                        "DateTime": "@{item()?['DateTime']}",
+                                                        "ErrorMessage": "@{item()?['ErrorMessage']}",
+                                                        "InvitationSent": "@{item()?['InvitationSent']}",
+                                                        "ObjectId": "@{item()?['ObjectId']}",
+                                                        "PartitionKey": "@{items('Main_loop_for_all_remote_tenants')?['TenantId']}",
+                                                        "RowKey": "@{guid()}",
+                                                        "TenantName": "@{items('Main_loop_for_all_remote_tenants')?['RowKey']}",
+                                                        "UserMail": "@{item()?['UserMail']}"
+                                                    }
+                                                },
+                                                "runAfter": {},
+                                                "type": "AppendToArrayVariable"
+                                            }
+                                        },
+                                        "foreach": "@body('Run_B2B_Sync_Worker')",
+                                        "runAfter": {
+                                            "Run_B2B_Sync_Worker": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Foreach"
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@item()?['AttributeSyncEnabled']",
+                                                "@true"
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {
+                                    "Save_output_to_Logging_Array": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "If"
+                            },
+                            "Run_B2B_Invitation_Worker": {
+                                "inputs": {
+                                    "body": {
+                                        "ApplicationId": "@{items('Main_loop_for_all_remote_tenants')?['ApplicationId']}",
+                                        "CustomizedMessageBody": "@{items('Main_loop_for_all_remote_tenants')?['CustomizedMessageBody']}",
+                                        "DisplayName": "@{items('Main_loop_for_all_remote_tenants')?['DisplayName']}",
+                                        "EmailDomain": "@split(replace(replace(item()?['EmailDomain'], ' ', '') , ';', ','),',')",
+                                        "GroupId": "@{items('Main_loop_for_all_remote_tenants')?['GroupId']}",
+                                        "InvitedUserType": "@{items('Main_loop_for_all_remote_tenants')?['InvitedUserType']}",
+                                        "KeyVaultURL": "@{body('Get_application_configuration')?['KeyVaultURL']}",
+                                        "SendInvitationMessage": "@items('Main_loop_for_all_remote_tenants')?['SendInvitationMessage']",
+                                        "TenantId": "@{items('Main_loop_for_all_remote_tenants')?['TenantId']}",
+                                        "inviteRedirectUrl": "@{items('Main_loop_for_all_remote_tenants')?['inviteRedirectUrl']}"
+                                    },
+                                    "host": {
+                                        "triggerName": "manual",
+                                        "workflow": {
+                                            "id": "/subscriptions/<subscriptionid>/resourceGroups/<resource_Group_ID>/providers/Microsoft.Logic/workflows/Invitation-Worker"
+                                        }
+                                    }
+                                },
+                                "runAfter": {},
+                                "type": "Workflow"
+                            },
+                            "Save_output_to_Logging_Array": {
+                                "actions": {
+                                    "Append_to_array_variable_LoggingArray": {
+                                        "inputs": {
+                                            "name": "LoggingArray",
+                                            "value": {
+                                                "Action": "@{items('Save_output_to_Logging_Array')?['Action']}",
+                                                "DateTime": "@{items('Save_output_to_Logging_Array')?['DateTime']}",
+                                                "ErrorMessage": "@{items('Save_output_to_Logging_Array')?['ErrorMessage']}",
+                                                "InvitationSent": "@{items('Save_output_to_Logging_Array')?['InvitationSent']}",
+                                                "ObjectId": "@{items('Save_output_to_Logging_Array')?['ObjectId']}",
+                                                "PartitionKey": "@{items('Main_loop_for_all_remote_tenants')?['TenantId']}",
+                                                "RowKey": "@{guid()}",
+                                                "TenantName": "@{items('Main_loop_for_all_remote_tenants')?['RowKey']}",
+                                                "UserMail": "@{items('Save_output_to_Logging_Array')?['UserMail']}"
+                                            }
+                                        },
+                                        "runAfter": {},
+                                        "type": "AppendToArrayVariable"
+                                    }
+                                },
+                                "foreach": "@body('Run_B2B_Invitation_Worker')",
+                                "runAfter": {
+                                    "Run_B2B_Invitation_Worker": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "concurrency": {
+                                        "repetitions": 50
+                                    }
+                                },
+                                "type": "Foreach"
+                            }
+                        },
+                        "description": "If Enabled is not true, don't enable automation for the tenant",
+                        "expression": {
+                            "and": [
+                                {
+                                    "equals": [
+                                        "@item()?['enabled']",
+                                        true
+                                    ]
+                                }
+                            ]
+                        },
+                        "runAfter": {},
+                        "type": "If"
+                    }
+                },
+                "foreach": "@body('Get_remote_AAD_tenants_configuration')?['value']",
+                "runAfter": {
+                    "Get_remote_AAD_tenants_configuration": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Foreach"
+            },
+            "Save_LoggingArray_to_Logs_table": {
+                "actions": {
+                    "Insert_log_entry_to_Logs_table": {
+                        "inputs": {
+                            "body": "@item()",
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "path": "/Tables/@{encodeURIComponent('Logs')}/entities"
+                        },
+                        "runAfter": {},
+                        "type": "ApiConnection"
+                    }
+                },
+                "foreach": "@variables('LoggingArray')",
+                "runAfter": {
+                    "Main_loop_for_all_remote_tenants": [
+                        "Succeeded",
+                        "Failed"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "concurrency": {
+                        "repetitions": 50
+                    }
+                },
+                "type": "Foreach"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "Recurrence": {
+                "recurrence": {
+                    "frequency": "Hour",
+                    "interval": 1
+                },
+                "type": "Recurrence"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "value": {
+                "azuretables": {
+                    "connectionId": "/subscriptions/<subscriptionid>/resourceGroups/<resource_Group_ID>/providers/Microsoft.Web/connections/azuretables",
+                    "connectionName": "azuretables",
+                    "id": "/subscriptions/<subscriptionid>/providers/Microsoft.Web/locations/westeurope/managedApis/azuretables"
+                }
+            }
+        }
+    }
+}

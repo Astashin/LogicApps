@@ -1,0 +1,1032 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Exclusion_array": {
+                "inputs": "@split(replace(replace(triggerBody()?['AttributeSyncExclusion'], ' ', '') , ';', ','),',')",
+                "runAfter": {
+                    "Initialize_variable_AttributesArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Compose"
+            },
+            "Final_Response_for_parent_workflow": {
+                "inputs": {
+                    "body": "@variables('LoggingArray')",
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "For_each_user_from_DeltaLinkUsers_table": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "For_each_user_from_DeltaLinkUsers_table": {
+                "actions": {
+                    "Check_if_DeltaLink_is_not_empty": {
+                        "actions": {
+                            "Add_DeltaLink_to_DeltaLinkUsers_table": {
+                                "inputs": {
+                                    "body": {
+                                        "DeltaLink": "@{if(empty(item()?['DeltaLink']), body('Get_DeltaLink_for_user_from_remote_tenant')?['@odata.deltaLink'], body('Run_query_using_DeltaLink')?['@odata.deltaLink'])}"
+                                    },
+                                    "headers": {
+                                        "If-Match": "*"
+                                    },
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                        }
+                                    },
+                                    "method": "patch",
+                                    "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities/etag(PartitionKey='@{encodeURIComponent(triggerBody()?['TenantId'])}',RowKey='@{encodeURIComponent(items('For_each_user_from_DeltaLinkUsers_table')?['RowKey'])}')"
+                                },
+                                "runAfter": {},
+                                "type": "ApiConnection"
+                            },
+                            "Log_Error_adding_new_Delta_link_to_DeltaLinkUsers_table": {
+                                "inputs": {
+                                    "name": "LoggingArray",
+                                    "value": {
+                                        "Action": "SyncErrorAddingDeltaLink",
+                                        "DateTime": "@{utcNow()}",
+                                        "ErrorMessage": "Error adding new Delta link to DeltaLinkUsers table",
+                                        "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                        "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Add_DeltaLink_to_DeltaLinkUsers_table": [
+                                        "Failed",
+                                        "TimedOut"
+                                    ]
+                                },
+                                "type": "AppendToArrayVariable"
+                            }
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "greater": [
+                                        "@length(if(empty(item()?['DeltaLink']), body('Get_DeltaLink_for_user_from_remote_tenant')?['@odata.deltaLink'], body('Run_query_using_DeltaLink')?['@odata.deltaLink']))",
+                                        0
+                                    ]
+                                }
+                            ]
+                        },
+                        "runAfter": {
+                            "Skip_excluded_user_objects": [
+                                "Succeeded",
+                                "Failed",
+                                "Skipped"
+                            ]
+                        },
+                        "type": "If"
+                    },
+                    "DeltaLink_for_sync_group_exists_in_storage_table": {
+                        "actions": {
+                            "Log_Error_querying_remote_tenant_using_Delta_link": {
+                                "inputs": {
+                                    "name": "LoggingArray",
+                                    "value": {
+                                        "Action": "SyncErrorDeltaLinkQuery",
+                                        "DateTime": "@{utcNow()}",
+                                        "ErrorMessage": "Error querying remote tenant using Delta link",
+                                        "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                        "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Run_query_using_DeltaLink": [
+                                        "Failed",
+                                        "TimedOut"
+                                    ]
+                                },
+                                "type": "AppendToArrayVariable"
+                            },
+                            "Run_query_using_DeltaLink": {
+                                "inputs": {
+                                    "authentication": {
+                                        "audience": "@variables('GraphAudienceURL')",
+                                        "clientId": "@triggerBody()?['ApplicationId']",
+                                        "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                        "tenant": "@triggerBody()?['TenantId']",
+                                        "type": "ActiveDirectoryOAuth"
+                                    },
+                                    "method": "GET",
+                                    "uri": "@{items('For_each_user_from_DeltaLinkUsers_table')?['DeltaLink']}"
+                                },
+                                "runAfter": {},
+                                "type": "Http"
+                            }
+                        },
+                        "description": "True if DeltaLink is found",
+                        "else": {
+                            "actions": {
+                                "Get_DeltaLink_for_user_from_remote_tenant": {
+                                    "inputs": {
+                                        "authentication": {
+                                            "audience": "@variables('GraphAudienceURL')",
+                                            "clientId": "@triggerBody()?['ApplicationId']",
+                                            "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                            "tenant": "@triggerBody()?['TenantId']",
+                                            "type": "ActiveDirectoryOAuth"
+                                        },
+                                        "method": "GET",
+                                        "uri": "https://graph.microsoft.com/v1.0/users/delta?$select=@{triggerBody()?['SyncedAttributes']}&$filter=id eq '@{items('For_each_user_from_DeltaLinkUsers_table')?['RowKey']}'&$deltaToken=latest"
+                                    },
+                                    "runAfter": {
+                                        "Run_initial_query_and_get_DeltaToken": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Http"
+                                },
+                                "Log_Error_getting_new_Delta_link_from_remote_tenant": {
+                                    "inputs": {
+                                        "name": "LoggingArray",
+                                        "value": {
+                                            "Action": "SyncErrorGetDeltaLink",
+                                            "DateTime": "@{utcNow()}",
+                                            "ErrorMessage": "Error getting new Delta link from remote tenant",
+                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Get_DeltaLink_for_user_from_remote_tenant": [
+                                            "TimedOut",
+                                            "Failed"
+                                        ]
+                                    },
+                                    "type": "AppendToArrayVariable"
+                                },
+                                "Log_Error_running_initial_query_to_get_user_attributes_from_remote_tenant": {
+                                    "inputs": {
+                                        "name": "LoggingArray",
+                                        "value": {
+                                            "Action": "SyncErrorInitialQuery",
+                                            "DateTime": "@{utcNow()}",
+                                            "ErrorMessage": "Error running initial query to get user attributes from remote tenant",
+                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Run_initial_query_and_get_DeltaToken": [
+                                            "TimedOut",
+                                            "Failed"
+                                        ]
+                                    },
+                                    "type": "AppendToArrayVariable"
+                                },
+                                "Run_initial_query_and_get_DeltaToken": {
+                                    "inputs": {
+                                        "authentication": {
+                                            "audience": "@variables('GraphAudienceURL')",
+                                            "clientId": "@triggerBody()?['ApplicationId']",
+                                            "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                            "tenant": "@triggerBody()?['TenantId']",
+                                            "type": "ActiveDirectoryOAuth"
+                                        },
+                                        "method": "GET",
+                                        "uri": "https://graph.microsoft.com/v1.0/users/delta?$select=@{triggerBody()?['SyncedAttributes']}&$filter=id eq '@{item()?['rowKey']}'"
+                                    },
+                                    "runAfter": {},
+                                    "type": "Http"
+                                }
+                            }
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "equals": [
+                                        "@empty(item()?['DeltaLink'])",
+                                        false
+                                    ]
+                                }
+                            ]
+                        },
+                        "runAfter": {},
+                        "type": "If"
+                    },
+                    "Skip_excluded_user_objects": {
+                        "actions": {
+                            "Check_if_attributes_need_to_be_updated": {
+                                "actions": {
+                                    "Check_if_user_exists_in_source_or_destination_tenants": {
+                                        "actions": {
+                                            "Log_User_object_was_not_found_in_local_tenant": {
+                                                "inputs": {
+                                                    "name": "LoggingArray",
+                                                    "value": {
+                                                        "Action": "SyncErrorUserNotFound",
+                                                        "DateTime": "@{utcNow()}",
+                                                        "ErrorMessage": "User object @{items('For_each_user_from_DeltaLinkUsers_table')?['userId']} was not found in the local tenant or remote tenant. Full sync might be required to resolve this issue.",
+                                                        "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                        "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                    }
+                                                },
+                                                "runAfter": {},
+                                                "type": "AppendToArrayVariable"
+                                            }
+                                        },
+                                        "else": {
+                                            "actions": {
+                                                "Check_if_there_are_secondary_proxy_addresses": {
+                                                    "actions": {
+                                                        "Add_new_mail_to_DeltaLinkUsers_table": {
+                                                            "inputs": {
+                                                                "body": {
+                                                                    "mail": "@{replace(first(body('Primary_mail_address_in_remote_tenant')), 'SMTP:', '')}"
+                                                                },
+                                                                "headers": {
+                                                                    "If-Match": "*"
+                                                                },
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "patch",
+                                                                "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities/etag(PartitionKey='@{encodeURIComponent(triggerBody()?['TenantId'])}',RowKey='@{encodeURIComponent(items('For_each_user_from_DeltaLinkUsers_table')?['RowKey'])}')"
+                                                            },
+                                                            "runAfter": {
+                                                                "Log_Successful_mail_proxy_attributes_sync": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "ApiConnection"
+                                                        },
+                                                        "For_every_secondary_proxy_address": {
+                                                            "actions": {
+                                                                "Check_if_proxyAddress_contains_already_adress_from_remote_tenant": {
+                                                                    "actions": {
+                                                                        "Error_changing_mail_attribute_in_the_local_tenant": {
+                                                                            "inputs": {
+                                                                                "name": "LoggingArray",
+                                                                                "value": {
+                                                                                    "Action": "SyncErrorWritingMailAttribute",
+                                                                                    "DateTime": "@{utcNow()}",
+                                                                                    "ErrorMessage": "Error changing mail attribute in the local tenant, probably due to conflict with existing address in the tenant",
+                                                                                    "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                                    "UserMail": "@{replace(item(),'smtp:', '')}"
+                                                                                }
+                                                                            },
+                                                                            "runAfter": {
+                                                                                "Set_mail_as_secondary_proxy_address_in_destination_tenant": [
+                                                                                    "Failed",
+                                                                                    "TimedOut"
+                                                                                ]
+                                                                            },
+                                                                            "type": "AppendToArrayVariable"
+                                                                        },
+                                                                        "Set_mail_as_secondary_proxy_address_in_destination_tenant": {
+                                                                            "description": "Workaround how to sync proxyAddress attribute - change mail attribute for every secondary proxy address ",
+                                                                            "inputs": {
+                                                                                "authentication": {
+                                                                                    "audience": "@variables('GraphAudienceURL')",
+                                                                                    "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                                    "type": "ManagedServiceIdentity"
+                                                                                },
+                                                                                "body": {
+                                                                                    "mail": "@{replace(item(),'smtp:', '')}"
+                                                                                },
+                                                                                "method": "PATCH",
+                                                                                "uri": "https://graph.microsoft.com/v1.0/users/@{items('For_each_user_from_DeltaLinkUsers_table')?['userid']}"
+                                                                            },
+                                                                            "runAfter": {},
+                                                                            "type": "Http"
+                                                                        }
+                                                                    },
+                                                                    "description": "True if doesn't contain",
+                                                                    "expression": {
+                                                                        "and": [
+                                                                            {
+                                                                                "not": {
+                                                                                    "contains": [
+                                                                                        "@first(body('Get_user_in_destination_tenant')?['value'])?['proxyAddresses']",
+                                                                                        "@item()"
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    "runAfter": {},
+                                                                    "type": "If"
+                                                                }
+                                                            },
+                                                            "foreach": "@body('Proxy_Addresses_in_remote_tenant')",
+                                                            "runAfter": {},
+                                                            "type": "Foreach"
+                                                        },
+                                                        "Log_Error_adding_new_mail_address_to_DeltaLinkUsers_table": {
+                                                            "inputs": {
+                                                                "name": "LoggingArray",
+                                                                "value": {
+                                                                    "Action": "SyncErrorAddingNewMail",
+                                                                    "DateTime": "@{utcNow()}",
+                                                                    "ErrorMessage": "Error adding new mail address to DeltaLinkUsers table",
+                                                                    "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                    "UserMail": "@{replace(first(body('Primary_mail_address_in_remote_tenant')), 'SMTP:', '')}"
+                                                                }
+                                                            },
+                                                            "runAfter": {
+                                                                "Add_new_mail_to_DeltaLinkUsers_table": [
+                                                                    "Failed",
+                                                                    "TimedOut"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable"
+                                                        },
+                                                        "Log_Error_changing_back_mail_attribute_in_the_local_tenant": {
+                                                            "inputs": {
+                                                                "name": "LoggingArray",
+                                                                "value": {
+                                                                    "Action": "SyncErrorWritingMailAttribute",
+                                                                    "DateTime": "@{utcNow()}",
+                                                                    "ErrorMessage": "Error changing mail attribute in the local tenant, probably due to conflict with existing address in the tenant",
+                                                                    "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                    "UserMail": "@{replace(first(body('Primary_mail_address_in_remote_tenant')), 'SMTP:', '')}"
+                                                                }
+                                                            },
+                                                            "runAfter": {
+                                                                "Set_primary_email_address_in_destination_tenant": [
+                                                                    "Failed",
+                                                                    "TimedOut"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable"
+                                                        },
+                                                        "Log_Successful_mail_proxy_attributes_sync": {
+                                                            "inputs": {
+                                                                "name": "LoggingArray",
+                                                                "value": {
+                                                                    "Action": "SyncMailProxyAttributes",
+                                                                    "DateTime": "@{utcNow()}",
+                                                                    "ErrorMessage": "Successful mail proxy attributes sync",
+                                                                    "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                    "UserMail": "@{replace(first(body('Primary_mail_address_in_remote_tenant')), 'SMTP:', '')}"
+                                                                }
+                                                            },
+                                                            "runAfter": {
+                                                                "Set_primary_email_address_in_destination_tenant": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable"
+                                                        },
+                                                        "Set_primary_email_address_in_destination_tenant": {
+                                                            "inputs": {
+                                                                "authentication": {
+                                                                    "audience": "@variables('GraphAudienceURL')",
+                                                                    "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                    "type": "ManagedServiceIdentity"
+                                                                },
+                                                                "body": {
+                                                                    "mail": "@{replace(first(body('Primary_mail_address_in_remote_tenant')), 'SMTP:', '')}",
+                                                                    "userprincipalname": "@{concat(replace(replace(first(body('Primary_mail_address_in_remote_tenant')), 'SMTP:', ''),'@','_'), '#EXT#@',triggerBody()?['DestinationTenantPrimaryDomain'])}"
+                                                                },
+                                                                "method": "PATCH",
+                                                                "uri": "https://graph.microsoft.com/v1.0/users/@{items('For_each_user_from_DeltaLinkUsers_table')?['userid']}"
+                                                            },
+                                                            "runAfter": {
+                                                                "For_every_secondary_proxy_address": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "Http"
+                                                        }
+                                                    },
+                                                    "description": "True if there are proxy addresses apart from primary SMTP address",
+                                                    "expression": {
+                                                        "and": [
+                                                            {
+                                                                "greater": [
+                                                                    "@length(body('Proxy_Addresses_in_remote_tenant'))",
+                                                                    0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "runAfter": {
+                                                        "Log_Successful_attribute_sync": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "If"
+                                                },
+                                                "Compose_DisplayName_attribute": {
+                                                    "inputs": "@if(and(not(empty(outputs('Remove_ProxyAddresses_attributes')?['givenName'])), not(empty(outputs('Remove_ProxyAddresses_attributes')?['surname']))), addProperty(removeProperty(outputs('Remove_ProxyAddresses_attributes'),'DisplayName'), 'DisplayName', concat(string(outputs('Remove_ProxyAddresses_attributes')?['givenName']) , ' ', string(outputs('Remove_ProxyAddresses_attributes')?['surName'] ))), outputs('Remove_ProxyAddresses_attributes'))",
+                                                    "runAfter": {},
+                                                    "type": "Compose"
+                                                },
+                                                "For_each_direct_report_changing_manager_in_local_tenant": {
+                                                    "actions": {
+                                                        "Get_userId_in_local_tenant": {
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "get",
+                                                                "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities",
+                                                                "queries": {
+                                                                    "$filter": "PartitionKey eq '@{triggerBody()?['TenantId']}' and RowKey eq '@{items('For_each_direct_report_changing_manager_in_local_tenant')?['id']}'"
+                                                                }
+                                                            },
+                                                            "runAfter": {},
+                                                            "type": "ApiConnection"
+                                                        },
+                                                        "If_user's_manager_is_found_in_DeltaLinkUsers_table": {
+                                                            "actions": {
+                                                                "Change_user's_manager_in_local_tenant": {
+                                                                    "inputs": {
+                                                                        "authentication": {
+                                                                            "audience": "@variables('GraphAudienceURL')",
+                                                                            "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                            "type": "ManagedServiceIdentity"
+                                                                        },
+                                                                        "body": {
+                                                                            "@@odata.id": "https://graph.microsoft.com/v1.0/users/@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}"
+                                                                        },
+                                                                        "method": "PUT",
+                                                                        "uri": "https://graph.microsoft.com/v1.0/users/@{first(body('Get_userId_in_local_tenant')?['value'])?['userId']}/manager/$ref"
+                                                                    },
+                                                                    "runAfter": {},
+                                                                    "type": "Http"
+                                                                },
+                                                                "Log_Error_setting_user's_manager_in_local_tenant": {
+                                                                    "inputs": {
+                                                                        "name": "LoggingArray",
+                                                                        "value": {
+                                                                            "Action": "SyncErrorSetManager",
+                                                                            "DateTime": "@{utcNow()}",
+                                                                            "ErrorMessage": "Error setting user's manager in local tenant",
+                                                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {
+                                                                        "Change_user's_manager_in_local_tenant": [
+                                                                            "Failed",
+                                                                            "TimedOut"
+                                                                        ]
+                                                                    },
+                                                                    "type": "AppendToArrayVariable"
+                                                                },
+                                                                "Log_Successfully_assigned_manager_for_user": {
+                                                                    "inputs": {
+                                                                        "name": "LoggingArray",
+                                                                        "value": {
+                                                                            "Action": "SyncSetManager",
+                                                                            "DateTime": "@{utcNow()}",
+                                                                            "ErrorMessage": "Successfully assigned manager for user @{first(body('Get_userId_in_local_tenant')?['value'])?['userId']}",
+                                                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {
+                                                                        "Change_user's_manager_in_local_tenant": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "type": "AppendToArrayVariable"
+                                                                }
+                                                            },
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "greater": [
+                                                                            "@length(body('Get_userId_in_local_tenant')?['value'])",
+                                                                            0
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "runAfter": {
+                                                                "Get_userId_in_local_tenant": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "If"
+                                                        },
+                                                        "Log_Error_querying_user's_manager_in_DeltaLinkUsers_table": {
+                                                            "inputs": {
+                                                                "name": "LoggingArray",
+                                                                "value": {
+                                                                    "Action": "SyncErrorGetManager",
+                                                                    "DateTime": "@{utcNow()}",
+                                                                    "ErrorMessage": "Error querying user's manager in DeltaLinkUsers table",
+                                                                    "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                                    "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                                }
+                                                            },
+                                                            "runAfter": {
+                                                                "Get_userId_in_local_tenant": [
+                                                                    "Failed",
+                                                                    "TimedOut"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable"
+                                                        }
+                                                    },
+                                                    "foreach": "@body('Get_direct_reports_from_remote_tenant')?['value']",
+                                                    "runAfter": {
+                                                        "Get_direct_reports_from_remote_tenant": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Foreach"
+                                                },
+                                                "Get_direct_reports_from_remote_tenant": {
+                                                    "inputs": {
+                                                        "authentication": {
+                                                            "audience": "@variables('GraphAudienceURL')",
+                                                            "clientId": "@triggerBody()?['ApplicationId']",
+                                                            "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                                            "tenant": "@triggerBody()?['TenantId']",
+                                                            "type": "ActiveDirectoryOAuth"
+                                                        },
+                                                        "method": "GET",
+                                                        "uri": "https://graph.microsoft.com/v1.0/users/@{items('For_each_user_from_DeltaLinkUsers_table')?['RowKey']}/directReports?$select=id"
+                                                    },
+                                                    "runAfter": {
+                                                        "Check_if_there_are_secondary_proxy_addresses": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Http"
+                                                },
+                                                "Log_Error_changing_attributes_in_local_tenant": {
+                                                    "inputs": {
+                                                        "name": "LoggingArray",
+                                                        "value": {
+                                                            "Action": "SyncErrorWritingAttributes",
+                                                            "DateTime": "@{utcNow()}",
+                                                            "ErrorMessage": "Error changing attributes in the local tenant",
+                                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Write_user_attributes_to_destination_tenant": [
+                                                            "Failed",
+                                                            "TimedOut"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                },
+                                                "Log_Error_querying_user's_direct_reports_from_remote_tenant": {
+                                                    "inputs": {
+                                                        "name": "LoggingArray",
+                                                        "value": {
+                                                            "Action": "SyncErrorGetDirectReport",
+                                                            "DateTime": "@{utcNow()}",
+                                                            "ErrorMessage": "Error querying user's direct reports from remote tenant",
+                                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Get_direct_reports_from_remote_tenant": [
+                                                            "Failed",
+                                                            "TimedOut"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                },
+                                                "Log_Remote_tenant_user_attribute_error": {
+                                                    "inputs": {
+                                                        "name": "LoggingArray",
+                                                        "value": {
+                                                            "Action": "SyncAttributeError",
+                                                            "DateTime": "@{utcNow()}",
+                                                            "ErrorMessage": "Remote tenant user attribute error",
+                                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Proxy_Addresses_in_remote_tenant": [
+                                                            "Skipped",
+                                                            "Failed"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                },
+                                                "Log_Successful_attribute_sync": {
+                                                    "inputs": {
+                                                        "name": "LoggingArray",
+                                                        "value": {
+                                                            "Action": "SyncAttributes",
+                                                            "DateTime": "@{utcNow()}",
+                                                            "ErrorMessage": "Successful attributes sync",
+                                                            "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                            "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Write_user_attributes_to_destination_tenant": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                },
+                                                "Primary_mail_address_in_remote_tenant": {
+                                                    "inputs": {
+                                                        "from": "@if(empty(item()?['DeltaLink']), first(body('Run_initial_query_and_get_DeltaToken')?['value'])?['proxyAddresses'], first(body('Run_query_using_DeltaLink')?['value'])?['proxyAddresses'])",
+                                                        "where": "@contains(item(), 'SMTP:')"
+                                                    },
+                                                    "runAfter": {
+                                                        "Compose_DisplayName_attribute": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Query"
+                                                },
+                                                "Proxy_Addresses_in_remote_tenant": {
+                                                    "inputs": {
+                                                        "from": "@if(empty(item()?['DeltaLink']), first(body('Run_initial_query_and_get_DeltaToken')?['value'])?['proxyAddresses'], first(body('Run_query_using_DeltaLink')?['value'])?['proxyAddresses'])",
+                                                        "where": "@contains(item(), 'smtp:')"
+                                                    },
+                                                    "runAfter": {
+                                                        "Primary_mail_address_in_remote_tenant": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Query"
+                                                },
+                                                "Write_user_attributes_to_destination_tenant": {
+                                                    "inputs": {
+                                                        "authentication": {
+                                                            "audience": "@variables('GraphAudienceURL')",
+                                                            "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                            "type": "ManagedServiceIdentity"
+                                                        },
+                                                        "body": "@outputs('Compose_DisplayName_attribute')",
+                                                        "method": "PATCH",
+                                                        "uri": "https://graph.microsoft.com/v1.0/users/@{items('For_each_user_from_DeltaLinkUsers_table')?['userid']}"
+                                                    },
+                                                    "runAfter": {
+                                                        "Proxy_Addresses_in_remote_tenant": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Http"
+                                                }
+                                            }
+                                        },
+                                        "expression": {
+                                            "or": [
+                                                {
+                                                    "equals": [
+                                                        "@if(empty(first(body('Get_user_in_destination_tenant')?['value'])), true, if(contains(string(body('Get_user_in_destination_tenant')?['value']), '@removed'), true, false))",
+                                                        true
+                                                    ]
+                                                },
+                                                {
+                                                    "equals": [
+                                                        "@contains(string(outputs('Remove_ProxyAddresses_attributes')), '@removed')",
+                                                        true
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "runAfter": {
+                                            "Remove_ProxyAddresses_attributes": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "If"
+                                    },
+                                    "Get_user_in_destination_tenant": {
+                                        "inputs": {
+                                            "authentication": {
+                                                "audience": "@variables('GraphAudienceURL')",
+                                                "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                "type": "ManagedServiceIdentity"
+                                            },
+                                            "method": "GET",
+                                            "uri": "https://graph.microsoft.com/v1.0/users?$select=@{triggerBody()?['SyncedAttributes']}&$filter=id eq '@{items('For_each_user_from_DeltaLinkUsers_table')?['userid']}'"
+                                        },
+                                        "runAfter": {},
+                                        "type": "Http"
+                                    },
+                                    "Log_Error_querying_user_account_in_local_tenant": {
+                                        "inputs": {
+                                            "name": "LoggingArray",
+                                            "value": {
+                                                "Action": "SyncErrorUserNotFound",
+                                                "DateTime": "@{utcNow()}",
+                                                "ErrorMessage": "User object @{items('For_each_user_from_DeltaLinkUsers_table')?['userId']} was not found in the local tenant or query failed",
+                                                "ObjectId": "@{items('For_each_user_from_DeltaLinkUsers_table')?['userId']}",
+                                                "UserMail": "@{items('For_each_user_from_DeltaLinkUsers_table')?['mail']}"
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Get_user_in_destination_tenant": [
+                                                "Failed",
+                                                "TimedOut"
+                                            ]
+                                        },
+                                        "type": "AppendToArrayVariable"
+                                    },
+                                    "Remove_ProxyAddresses_attributes": {
+                                        "inputs": "@removeProperty(removeProperty(removeProperty(if(empty(item()?['DeltaLink']), first(body('Run_initial_query_and_get_DeltaToken')?['value']), first(body('Run_query_using_DeltaLink')?['value'])),'proxyAddresses'), 'mail'), 'id')",
+                                        "runAfter": {
+                                            "Get_user_in_destination_tenant": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Compose"
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@empty(if(empty(item()?['DeltaLink']), first(body('Run_initial_query_and_get_DeltaToken')?['value']), first(body('Run_query_using_DeltaLink')?['value'])))",
+                                                false
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {},
+                                "type": "If"
+                            }
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "not": {
+                                        "contains": [
+                                            "@outputs('Exclusion_array')",
+                                            "@item()?['userId']"
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        "runAfter": {
+                            "DeltaLink_for_sync_group_exists_in_storage_table": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "If"
+                    }
+                },
+                "description": "Loop all users",
+                "foreach": "@body('Get_Delta_query_link_from_DeltaLinkUsers_table')?['value']",
+                "runAfter": {
+                    "Get_Delta_query_link_from_DeltaLinkUsers_table": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "concurrency": {
+                        "repetitions": 50
+                    }
+                },
+                "type": "Foreach"
+            },
+            "Get_Delta_query_link_from_DeltaLinkUsers_table": {
+                "description": "Get all users from a tenant from DeltaLinkUsers table",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities",
+                    "queries": {
+                        "$filter": "PartitionKey eq '@{triggerBody()?['TenantId']}'"
+                    }
+                },
+                "runAfter": {
+                    "Get_application_secret_for_remote_tenant_": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Get_application_secret_for_remote_tenant_": {
+                "inputs": {
+                    "authentication": {
+                        "audience": "https://vault.azure.net",
+                        "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                        "type": "ManagedServiceIdentity"
+                    },
+                    "method": "GET",
+                    "uri": "@{variables('KeyVaultURL')}/secrets/@{triggerBody()?['ApplicationId']}?api-version=7.1"
+                },
+                "runAfter": {
+                    "Exclusion_array": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "outputs"
+                        ]
+                    }
+                },
+                "type": "Http"
+            },
+            "Initialize_variable_AttributesArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "AttributesArray",
+                            "type": "object"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_DestinationTenantUserId": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_DeltaLink": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "DeltaLink",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_GraphAudienceURL": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_DestinationTenantUserId": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "DestinationTenantUserId",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_LoggingArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_GraphAudienceURL": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "GraphAudienceURL",
+                            "type": "string",
+                            "value": "https://graph.microsoft.com"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_KeyVaultURL": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_KeyVaultURL": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "KeyVaultURL",
+                            "type": "string",
+                            "value": "@{triggerBody()?['KeyVaultURL']}"
+                        }
+                    ]
+                },
+                "runAfter": {},
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_LoggingArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "LoggingArray",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_DeltaLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Response_Error_getting_secrets_from_Key_Vault": {
+                "inputs": {
+                    "body": {
+                        "Action": "SyncWorkflowError",
+                        "DateTime": "@{utcNow()}",
+                        "ErrorMessage": "Error getting secrets from Key Vault",
+                        "ObjectId": "",
+                        "UserMail": ""
+                    },
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Get_application_secret_for_remote_tenant_": [
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Response_Error_querying_DeltaLinkUsers_table": {
+                "inputs": {
+                    "body": {
+                        "Action": "SyncWorkflowError",
+                        "DateTime": "@{utcNow()}",
+                        "ErrorMessage": "Error querying DeltaLinkUsers table",
+                        "InvitationSent": "",
+                        "ObjectId": "",
+                        "UserMail": ""
+                    },
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Get_Delta_query_link_from_DeltaLinkUsers_table": [
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "manual": {
+                "inputs": {
+                    "schema": {
+                        "properties": {
+                            "ApplicationId": {
+                                "type": "string"
+                            },
+                            "AttributeSyncExclusion": {
+                                "type": "string"
+                            },
+                            "DestinationTenantPrimaryDomain": {
+                                "type": "string"
+                            },
+                            "KeyVaultURL": {
+                                "type": "string"
+                            },
+                            "SyncedAttributes": {
+                                "type": "string"
+                            },
+                            "TenantId": {
+                                "type": "string"
+                            }
+                        },
+                        "type": "object"
+                    }
+                },
+                "kind": "Http",
+                "type": "Request"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "value": {
+                "azuretables": {
+                    "connectionId": "/subscriptions/<subscriptionid>/resourceGroups/<resource_Group_ID>/providers/Microsoft.Web/connections/azuretables",
+                    "connectionName": "azuretables",
+                    "id": "/subscriptions/<subscriptionid>/providers/Microsoft.Web/locations/westeurope/managedApis/azuretables"
+                }
+            }
+        }
+    }
+}

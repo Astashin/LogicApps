@@ -1,0 +1,1534 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Check_if_DeltaLink_variable_is_not_empty": {
+                "actions": {},
+                "else": {
+                    "actions": {
+                        "Error_adding_new_delta_link_information_to_logging_array": {
+                            "inputs": {
+                                "name": "LoggingArray",
+                                "value": {
+                                    "Action": "NewDeltaLink",
+                                    "DateTime": "@{utcNow()}",
+                                    "ErrorMessage": "Error saving Delta link",
+                                    "InvitationSent": "",
+                                    "ObjectId": "",
+                                    "UserMail": ""
+                                }
+                            },
+                            "runAfter": {
+                                "Insert_or_Replace_Entity_DeltaLink_in_DeltaLinkGroups_table": [
+                                    "TimedOut",
+                                    "Failed"
+                                ]
+                            },
+                            "type": "AppendToArrayVariable"
+                        },
+                        "Insert_or_Replace_Entity_DeltaLink_in_DeltaLinkGroups_table": {
+                            "inputs": {
+                                "body": {
+                                    "DeltaLink": "@{variables('DeltaLink')}"
+                                },
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                    }
+                                },
+                                "method": "put",
+                                "path": "/Tables/@{encodeURIComponent('DeltaLinkGroups')}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['TenantId'])}',RowKey='@{encodeURIComponent(triggerBody()?['GroupId'])}')"
+                            },
+                            "runAfter": {},
+                            "type": "ApiConnection"
+                        }
+                    }
+                },
+                "expression": {
+                    "and": [
+                        {
+                            "equals": [
+                                "@length(variables('DeltaLink'))",
+                                0
+                            ]
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Users_exist_in_DeltaLink_or_NextLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            },
+            "DeltaLink_for_sync_group_exists_in_storage_table": {
+                "actions": {
+                    "Parse_JSON_Group_Members_DeltaLink_query": {
+                        "inputs": {
+                            "content": "@body('Run_query_using_DeltaLink')",
+                            "schema": {
+                                "properties": {
+                                    "@@odata.context": {
+                                        "type": "string"
+                                    },
+                                    "@@odata.deltaLink": {
+                                        "type": "string"
+                                    },
+                                    "@@odata.nextLink": {
+                                        "type": "string"
+                                    },
+                                    "value": {
+                                        "items": {
+                                            "properties": {
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "displayName": {
+                                                    "type": "string"
+                                                },
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "members@delta": {
+                                                    "items": {
+                                                        "properties": {
+                                                            "@@odata.type": {
+                                                                "type": "string"
+                                                            },
+                                                            "@@removed": {
+                                                                "properties": {
+                                                                    "reason": {
+                                                                        "type": "string"
+                                                                    }
+                                                                },
+                                                                "type": "object"
+                                                            },
+                                                            "id": {
+                                                                "type": "string"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "type": "array"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": "array"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        },
+                        "runAfter": {
+                            "Run_query_using_DeltaLink": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "ParseJson"
+                    },
+                    "Run_query_using_DeltaLink": {
+                        "inputs": {
+                            "authentication": {
+                                "audience": "@variables('GraphAudienceURL')",
+                                "clientId": "@triggerBody()?['ApplicationId']",
+                                "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                "tenant": "@triggerBody()?['TenantId']",
+                                "type": "ActiveDirectoryOAuth"
+                            },
+                            "method": "GET",
+                            "uri": "@{first(body('Get_Delta_query_link_from_DeltaQueriesGroups_table')?['value'])?['DeltaLink']}"
+                        },
+                        "runAfter": {},
+                        "type": "Http"
+                    },
+                    "Set_variable_DeltaLink_after_DeltaLink_query": {
+                        "inputs": {
+                            "name": "DeltaLink",
+                            "value": "@body('Parse_JSON_Group_Members_DeltaLink_query')?['@odata.deltaLink']"
+                        },
+                        "runAfter": {
+                            "Set_variable_NextLink_after_DeltaLink_query": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    },
+                    "Set_variable_NextLink_after_DeltaLink_query": {
+                        "inputs": {
+                            "name": "NextLink",
+                            "value": "@body('Parse_JSON_Group_Members_DeltaLink_query')?['@odata.nextLink']"
+                        },
+                        "runAfter": {
+                            "Parse_JSON_Group_Members_DeltaLink_query": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    }
+                },
+                "description": "True if DeltaLink is found",
+                "else": {
+                    "actions": {
+                        "Parse_JSON_Group_Members": {
+                            "inputs": {
+                                "content": "@body('Run_initial_query_and_get_DeltaToken')",
+                                "schema": {
+                                    "properties": {
+                                        "@@odata.context": {
+                                            "type": "string"
+                                        },
+                                        "@@odata.deltaLink": {
+                                            "type": "string"
+                                        },
+                                        "@@odata.nextLink": {
+                                            "type": "string"
+                                        },
+                                        "value": {
+                                            "items": {
+                                                "properties": {
+                                                    "description": {
+                                                        "type": "string"
+                                                    },
+                                                    "displayName": {
+                                                        "type": "string"
+                                                    },
+                                                    "id": {
+                                                        "type": "string"
+                                                    },
+                                                    "members@delta": {
+                                                        "items": {
+                                                            "properties": {
+                                                                "@@odata.type": {
+                                                                    "type": "string"
+                                                                },
+                                                                "@@removed": {
+                                                                    "properties": {
+                                                                        "reason": {
+                                                                            "type": "string"
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                },
+                                                                "id": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        },
+                                                        "type": "array"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            },
+                                            "type": "array"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            },
+                            "runAfter": {
+                                "Wait_for_Graph_API_replication_completes": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ParseJson"
+                        },
+                        "Run_initial_query_and_get_DeltaToken": {
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@variables('GraphAudienceURL')",
+                                    "clientId": "@triggerBody()?['ApplicationId']",
+                                    "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                    "tenant": "@triggerBody()?['TenantId']",
+                                    "type": "ActiveDirectoryOAuth"
+                                },
+                                "method": "GET",
+                                "uri": "https://graph.microsoft.com/v1.0/groups/delta?$select=members&$filter=id eq '@{triggerBody()?['GroupId']}'"
+                            },
+                            "runAfter": {},
+                            "type": "Http"
+                        },
+                        "Set_variable_DeltaLink": {
+                            "inputs": {
+                                "name": "DeltaLink",
+                                "value": "@body('Parse_JSON_Group_Members')?['@odata.deltaLink']"
+                            },
+                            "runAfter": {
+                                "Set_variable_NextLink": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "SetVariable"
+                        },
+                        "Set_variable_NextLink": {
+                            "inputs": {
+                                "name": "NextLink",
+                                "value": "@body('Parse_JSON_Group_Members')?['@odata.nextLink']"
+                            },
+                            "runAfter": {
+                                "Parse_JSON_Group_Members": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "SetVariable"
+                        },
+                        "Wait_for_Graph_API_replication_completes": {
+                            "inputs": {
+                                "interval": {
+                                    "count": 5,
+                                    "unit": "Second"
+                                }
+                            },
+                            "runAfter": {
+                                "Run_initial_query_and_get_DeltaToken": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Wait"
+                        }
+                    }
+                },
+                "expression": {
+                    "and": [
+                        {
+                            "greater": [
+                                "@length(body('Get_Delta_query_link_from_DeltaQueriesGroups_table')?['value'])",
+                                0
+                            ]
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Get_Delta_query_link_from_DeltaQueriesGroups_table": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            },
+            "Final_Response_for_parent_workflow": {
+                "inputs": {
+                    "body": "@variables('LoggingArray')",
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Check_if_DeltaLink_variable_is_not_empty": [
+                        "Succeeded",
+                        "Skipped",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Get_Delta_query_link_from_DeltaQueriesGroups_table": {
+                "description": "Search for existing Delta query for of sync group in the table",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Tables/@{encodeURIComponent('DeltaLinkGroups')}/entities",
+                    "queries": {
+                        "$filter": "RowKey eq '@{triggerBody()?['GroupId']}' and PartitionKey eq '@{triggerBody()?['TenantId']}'",
+                        "$select": "DeltaLink"
+                    }
+                },
+                "runAfter": {
+                    "Get_application_secret_for_remote_tenant_": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Get_application_secret_for_remote_tenant_": {
+                "inputs": {
+                    "authentication": {
+                        "audience": "https://vault.azure.net",
+                        "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                        "type": "ManagedServiceIdentity"
+                    },
+                    "method": "GET",
+                    "uri": "@{variables('KeyVaultURL')}/secrets/@{triggerBody()?['ApplicationId']}?api-version=7.1"
+                },
+                "runAfter": {
+                    "Initialize_variable_DestinationTenantUserId": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "outputs"
+                        ]
+                    }
+                },
+                "type": "Http"
+            },
+            "Initialize_variable_DeltaLink": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "DeltaLink",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_NextLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_DestinationTenantUserId": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "DestinationTenantUserId",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_LoggingArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_GraphAudienceURL": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "GraphAudienceURL",
+                            "type": "string",
+                            "value": "https://graph.microsoft.com"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_KeyVaultURL": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_KeyVaultURL": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "KeyVaultURL",
+                            "type": "string",
+                            "value": "@{triggerBody()?['KeyVaultURL']}"
+                        }
+                    ]
+                },
+                "runAfter": {},
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_LoggingArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "LoggingArray",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_UsersArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_NextLink": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "NextLink",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_GraphAudienceURL": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_UsersArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "UsersArray",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_DeltaLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Response_Error_executing_Graph_API_delta_query": {
+                "inputs": {
+                    "body": {
+                        "Action": "WorkflowError",
+                        "DateTime": "@{utcNow()}",
+                        "ErrorMessage": "Error executing Graph API delta query",
+                        "InvitationSent": "",
+                        "ObjectId": "",
+                        "UserMail": ""
+                    },
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "DeltaLink_for_sync_group_exists_in_storage_table": [
+                        "Skipped",
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Response_Error_getting_secrets_from_Key_Vault": {
+                "inputs": {
+                    "body": {
+                        "Action": "WorkflowError",
+                        "DateTime": "@{utcNow()}",
+                        "ErrorMessage": "Error getting secrets from Key Vault",
+                        "InvitationSent": "",
+                        "ObjectId": "",
+                        "UserMail": ""
+                    },
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Get_application_secret_for_remote_tenant_": [
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Response_Error_querying_DeltaLinkGroups_table": {
+                "inputs": {
+                    "body": {
+                        "Action": "WorkflowError",
+                        "DateTime": "@{utcNow()}",
+                        "ErrorMessage": "Error querying DeltaLinkGroups table",
+                        "InvitationSent": "",
+                        "ObjectId": "",
+                        "UserMail": ""
+                    },
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Get_Delta_query_link_from_DeltaQueriesGroups_table": [
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Users_exist_in_DeltaLink_or_NextLink": {
+                "actions": {
+                    "Apply_to_each_-_User_in_Array": {
+                        "actions": {
+                            "Check_if_remote_user_has_mail_attribute_populated": {
+                                "actions": {
+                                    "Append_Log_array_Error_executing_Graph_API_in_destination_tenant": {
+                                        "inputs": {
+                                            "name": "LoggingArray",
+                                            "value": {
+                                                "Action": "WorkflowRun",
+                                                "DateTime": "@{utcNow()}",
+                                                "ErrorMessage": "Error executing Graph API in destination tenant",
+                                                "InvitationSent": "",
+                                                "ObjectId": "",
+                                                "UserMail": ""
+                                            }
+                                        },
+                                        "runAfter": {
+                                            "Query_remote_user_in_Destination_tenant": [
+                                                "Failed",
+                                                "TimedOut"
+                                            ]
+                                        },
+                                        "type": "AppendToArrayVariable"
+                                    },
+                                    "Check_if_user_added_or_removed_from_group": {
+                                        "actions": {
+                                            "Check_if_invited_user_already_exists_in_Destination_tenant": {
+                                                "actions": {
+                                                    "If_user_is_not_external_in_remote_tenant_and_doesn't_exist_in_Destination": {
+                                                        "actions": {
+                                                            "Check_if_previously_invited_user_has_been_deleted": {
+                                                                "actions": {
+                                                                    "Fill_Logging_Array_Failed_invitation": {
+                                                                        "inputs": {
+                                                                            "name": "LoggingArray",
+                                                                            "value": {
+                                                                                "Action": "Invite",
+                                                                                "DateTime": "@{utcNow()}",
+                                                                                "ErrorMessage": "Invitation failed",
+                                                                                "InvitationSent": "@{triggerBody()?['SendInvitationMessage']}",
+                                                                                "ObjectId": "",
+                                                                                "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                            }
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Invite_user_to_Destination_tenant": [
+                                                                                "Failed",
+                                                                                "TimedOut"
+                                                                            ]
+                                                                        },
+                                                                        "type": "AppendToArrayVariable"
+                                                                    },
+                                                                    "Fill_Logging_Array_after_inviting_new_user_to_destination_tenant": {
+                                                                        "inputs": {
+                                                                            "name": "LoggingArray",
+                                                                            "value": {
+                                                                                "Action": "Invite",
+                                                                                "DateTime": "@{utcNow()}",
+                                                                                "ErrorMessage": "",
+                                                                                "InvitationSent": "@{triggerBody()?['SendInvitationMessage']}",
+                                                                                "ObjectId": "@{body('Invite_user_to_Destination_tenant')?['invitedUser']?['id']}",
+                                                                                "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                            }
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Invite_user_to_Destination_tenant": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        },
+                                                                        "type": "AppendToArrayVariable"
+                                                                    },
+                                                                    "Invite_user_to_Destination_tenant": {
+                                                                        "description": "Creating external account in Destination tenant sending invitation to user",
+                                                                        "inputs": {
+                                                                            "authentication": {
+                                                                                "audience": "@variables('GraphAudienceURL')",
+                                                                                "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                                "type": "ManagedServiceIdentity"
+                                                                            },
+                                                                            "body": {
+                                                                                "CustomizedMessageBody": "@{triggerBody()?['CustomizedMessageBody']}",
+                                                                                "SendInvitationMessage": "@triggerBody()?['SendInvitationMessage']",
+                                                                                "inviteRedirectUrl": "@{triggerBody()?['inviteRedirectUrl']}",
+                                                                                "invitedUserDisplayName": "@{ concat(if (equals(trim(concat(first(body('Get_user_from_remote_tenant')?['value'])?['GivenName'],' ',first(body('Get_user_from_remote_tenant')?['value'])?['SurName'])),'') , first(body('Get_user_from_remote_tenant')?['value'])?['DisplayName'], trim(concat(first(body('Get_user_from_remote_tenant')?['value'])?['GivenName'],' ',first(body('Get_user_from_remote_tenant')?['value'])?['SurName']))) , ' (', triggerBody()?['DisplayName'], ')')}",
+                                                                                "invitedUserEmailAddress": "@{outputs('User_mail_in_remote_tenant')}",
+                                                                                "invitedUserType": "@{triggerBody()?['InvitedUserType']}"
+                                                                            },
+                                                                            "method": "POST",
+                                                                            "uri": "https://graph.microsoft.com/v1.0/invitations"
+                                                                        },
+                                                                        "runAfter": {},
+                                                                        "type": "Http"
+                                                                    },
+                                                                    "Set_variable_DestinationTenantUserId_after_invitation": {
+                                                                        "inputs": {
+                                                                            "name": "DestinationTenantUserId",
+                                                                            "value": "@{body('Invite_user_to_Destination_tenant')?['invitedUser']?['id']}"
+                                                                        },
+                                                                        "runAfter": {
+                                                                            "Fill_Logging_Array_after_inviting_new_user_to_destination_tenant": [
+                                                                                "Succeeded"
+                                                                            ]
+                                                                        },
+                                                                        "type": "SetVariable"
+                                                                    }
+                                                                },
+                                                                "description": "True if account is not in list deleted accounts ",
+                                                                "else": {
+                                                                    "actions": {
+                                                                        "Fill_Logging_Array_after_failed_restoration": {
+                                                                            "inputs": {
+                                                                                "name": "LoggingArray",
+                                                                                "value": {
+                                                                                    "Action": "Restore",
+                                                                                    "DateTime": "@{utcNow()}",
+                                                                                    "ErrorMessage": "Restore failed",
+                                                                                    "InvitationSent": "False",
+                                                                                    "ObjectId": "@{first(body('Check_if_previously_invited_user_with_mail_address_has_been_deleted')?['value'])?['id']}",
+                                                                                    "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                                }
+                                                                            },
+                                                                            "runAfter": {
+                                                                                "Restore_previously_invited_user_account_from_deleted": [
+                                                                                    "Failed",
+                                                                                    "TimedOut"
+                                                                                ]
+                                                                            },
+                                                                            "type": "AppendToArrayVariable"
+                                                                        },
+                                                                        "Fill_Logging_Array_after_restoring_user_account_in_destination_tenant": {
+                                                                            "inputs": {
+                                                                                "name": "LoggingArray",
+                                                                                "value": {
+                                                                                    "Action": "Restore",
+                                                                                    "DateTime": "@{utcNow()}",
+                                                                                    "ErrorMessage": "",
+                                                                                    "InvitationSent": "False",
+                                                                                    "ObjectId": "@{first(body('Check_if_previously_invited_user_with_mail_address_has_been_deleted')?['value'])?['id']}",
+                                                                                    "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                                }
+                                                                            },
+                                                                            "runAfter": {
+                                                                                "Restore_previously_invited_user_account_from_deleted": [
+                                                                                    "Succeeded"
+                                                                                ]
+                                                                            },
+                                                                            "type": "AppendToArrayVariable"
+                                                                        },
+                                                                        "Restore_previously_invited_user_account_from_deleted": {
+                                                                            "inputs": {
+                                                                                "authentication": {
+                                                                                    "audience": "@variables('GraphAudienceURL')",
+                                                                                    "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                                    "type": "ManagedServiceIdentity"
+                                                                                },
+                                                                                "method": "POST",
+                                                                                "uri": "https://graph.microsoft.com/v1.0/directory/deletedItems/@{first(body('Check_if_previously_invited_user_with_mail_address_has_been_deleted')?['value'])?['id']}/restore"
+                                                                            },
+                                                                            "runAfter": {},
+                                                                            "type": "Http"
+                                                                        },
+                                                                        "Set_variable_DestinationTenantuserId_after_restoring_user": {
+                                                                            "inputs": {
+                                                                                "name": "DestinationTenantUserId",
+                                                                                "value": "@{first(body('Check_if_previously_invited_user_with_mail_address_has_been_deleted')?['value'])?['id']}"
+                                                                            },
+                                                                            "runAfter": {
+                                                                                "Fill_Logging_Array_after_restoring_user_account_in_destination_tenant": [
+                                                                                    "Succeeded"
+                                                                                ]
+                                                                            },
+                                                                            "type": "SetVariable"
+                                                                        }
+                                                                    }
+                                                                },
+                                                                "expression": {
+                                                                    "and": [
+                                                                        {
+                                                                            "equals": [
+                                                                                "@length(body('Check_if_previously_invited_user_with_mail_address_has_been_deleted')?['value'])",
+                                                                                0
+                                                                            ]
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "runAfter": {
+                                                                    "Check_if_previously_invited_user_with_mail_address_has_been_deleted": [
+                                                                        "Succeeded"
+                                                                    ]
+                                                                },
+                                                                "type": "If"
+                                                            },
+                                                            "Check_if_previously_invited_user_with_mail_address_has_been_deleted": {
+                                                                "description": "Check list of deleted users to not invite previously removed user but restore account from deleted",
+                                                                "inputs": {
+                                                                    "authentication": {
+                                                                        "audience": "@variables('GraphAudienceURL')",
+                                                                        "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                        "type": "ManagedServiceIdentity"
+                                                                    },
+                                                                    "method": "GET",
+                                                                    "uri": "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.user?$select=id,mail,userprincipalname&$filter=mail eq '@{outputs('User_mail_in_remote_tenant')}' and CreationType eq 'invitation'"
+                                                                },
+                                                                "runAfter": {},
+                                                                "type": "Http"
+                                                            },
+                                                            "Insert_or_Replace_local_user_into_DeltaLinkUsers_table": {
+                                                                "inputs": {
+                                                                    "body": {
+                                                                        "mail": "@{outputs('User_mail_in_remote_tenant')}",
+                                                                        "userId": "@{variables('DestinationTenantUserId')}"
+                                                                    },
+                                                                    "host": {
+                                                                        "connection": {
+                                                                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                                                        }
+                                                                    },
+                                                                    "method": "put",
+                                                                    "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['TenantId'])}',RowKey='@{encodeURIComponent(items('Apply_to_each_-_User_in_Array')?['id'])}')"
+                                                                },
+                                                                "runAfter": {
+                                                                    "Check_if_previously_invited_user_has_been_deleted": [
+                                                                        "Succeeded"
+                                                                    ]
+                                                                },
+                                                                "type": "ApiConnection"
+                                                            }
+                                                        },
+                                                        "description": "We skip external users from BA tenants even if admins added them to sync group.  We want to invite user only if he doesn't exist already in Destination tenant. We invite user accounts with mail address not empty and from mail domain in configuration",
+                                                        "else": {
+                                                            "actions": {
+                                                                "Fill_logging_array_after_skipping_external_account": {
+                                                                    "inputs": {
+                                                                        "name": "LoggingArray",
+                                                                        "value": {
+                                                                            "Action": "IgnoreExternal",
+                                                                            "DateTime": "@{utcNow()}",
+                                                                            "ErrorMessage": "",
+                                                                            "InvitationSent": "False",
+                                                                            "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}",
+                                                                            "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {},
+                                                                    "type": "AppendToArrayVariable"
+                                                                }
+                                                            }
+                                                        },
+                                                        "expression": {
+                                                            "and": [
+                                                                {
+                                                                    "not": {
+                                                                        "equals": [
+                                                                            "@first(body('Get_user_from_remote_tenant')?['value'])?['CreationType']",
+                                                                            "Invitation"
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            ]
+                                                        },
+                                                        "runAfter": {},
+                                                        "type": "If"
+                                                    }
+                                                },
+                                                "description": "True if user doesn't exist",
+                                                "else": {
+                                                    "actions": {
+                                                        "Existing_account_has_been_invited_as_guest": {
+                                                            "actions": {
+                                                                "Convert_user_type_of_already_invited_account_to_member": {
+                                                                    "inputs": {
+                                                                        "authentication": {
+                                                                            "audience": "@variables('GraphAudienceURL')",
+                                                                            "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                            "type": "ManagedServiceIdentity"
+                                                                        },
+                                                                        "body": {
+                                                                            "usertype": "member"
+                                                                        },
+                                                                        "method": "PATCH",
+                                                                        "uri": "https://graph.microsoft.com/v1.0/users/@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}"
+                                                                    },
+                                                                    "runAfter": {},
+                                                                    "type": "Http"
+                                                                },
+                                                                "Fill_Logging_array_after_converting_existing_account_to_member": {
+                                                                    "inputs": {
+                                                                        "name": "LoggingArray",
+                                                                        "value": {
+                                                                            "Action": "Convert",
+                                                                            "DateTime": "@{utcNow()}",
+                                                                            "ErrorMessage": "",
+                                                                            "InvitationSent": "False",
+                                                                            "ObjectId": "@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}",
+                                                                            "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {
+                                                                        "Convert_user_type_of_already_invited_account_to_member": [
+                                                                            "Succeeded"
+                                                                        ]
+                                                                    },
+                                                                    "type": "AppendToArrayVariable"
+                                                                },
+                                                                "Fill_Logging_array_after_failed_conversion_of_existing_account_to_member": {
+                                                                    "inputs": {
+                                                                        "name": "LoggingArray",
+                                                                        "value": {
+                                                                            "Action": "Convert",
+                                                                            "DateTime": "@{utcNow()}",
+                                                                            "ErrorMessage": "Conversion failed",
+                                                                            "InvitationSent": "False",
+                                                                            "ObjectId": "@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}",
+                                                                            "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                        }
+                                                                    },
+                                                                    "runAfter": {
+                                                                        "Convert_user_type_of_already_invited_account_to_member": [
+                                                                            "Failed",
+                                                                            "TimedOut"
+                                                                        ]
+                                                                    },
+                                                                    "type": "AppendToArrayVariable"
+                                                                }
+                                                            },
+                                                            "description": "True if usertype attribute is guest",
+                                                            "else": {
+                                                                "actions": {
+                                                                    "Log_information_about_skipped_member_conversion": {
+                                                                        "inputs": {
+                                                                            "name": "LoggingArray",
+                                                                            "value": {
+                                                                                "Action": "IgnoreExistingUser",
+                                                                                "DateTime": "@{utcNow()}",
+                                                                                "ErrorMessage": "Skipping existing user object in the destination tenant",
+                                                                                "InvitationSent": "False",
+                                                                                "ObjectId": "@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}",
+                                                                                "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                            }
+                                                                        },
+                                                                        "runAfter": {},
+                                                                        "type": "AppendToArrayVariable"
+                                                                    }
+                                                                }
+                                                            },
+                                                            "expression": {
+                                                                "and": [
+                                                                    {
+                                                                        "equals": [
+                                                                            "@toLower(first(body('Query_remote_user_in_Destination_tenant')?['value'])?['usertype'])",
+                                                                            "guest"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "runAfter": {},
+                                                            "type": "If"
+                                                        },
+                                                        "Insert_or_Replace_local_existing_user_into_DeltaLinkUsers_table": {
+                                                            "inputs": {
+                                                                "body": {
+                                                                    "mail": "@{outputs('User_mail_in_remote_tenant')}",
+                                                                    "userId": "@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}"
+                                                                },
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "put",
+                                                                "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['TenantId'])}',RowKey='@{encodeURIComponent(items('Apply_to_each_-_User_in_Array')?['id'])}')"
+                                                            },
+                                                            "runAfter": {
+                                                                "Existing_account_has_been_invited_as_guest": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "ApiConnection"
+                                                        }
+                                                    }
+                                                },
+                                                "expression": {
+                                                    "and": [
+                                                        {
+                                                            "equals": [
+                                                                "@length(body('Query_remote_user_in_Destination_tenant')?['value'])",
+                                                                0
+                                                            ]
+                                                        }
+                                                    ]
+                                                },
+                                                "runAfter": {},
+                                                "type": "If"
+                                            }
+                                        },
+                                        "description": "True if new user is added to, false if removed from sync group",
+                                        "else": {
+                                            "actions": {
+                                                "Check_if_external_user_exists_in_Destination": {
+                                                    "actions": {
+                                                        "Fill_Logging_Array_after_failed_account_removal_in_destination_tenant": {
+                                                            "inputs": {
+                                                                "name": "LoggingArray",
+                                                                "value": {
+                                                                    "Action": "Remove",
+                                                                    "DateTime": "@{utcNow()}",
+                                                                    "ErrorMessage": "Removal failed",
+                                                                    "InvitationSent": "False",
+                                                                    "ObjectId": "@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}",
+                                                                    "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                }
+                                                            },
+                                                            "runAfter": {
+                                                                "Remove_external_user_from_Destination_tenant": [
+                                                                    "Failed",
+                                                                    "TimedOut"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable"
+                                                        },
+                                                        "Fill_Logging_Array_after_removing_account_from_destination_tenant": {
+                                                            "inputs": {
+                                                                "name": "LoggingArray",
+                                                                "value": {
+                                                                    "Action": "Remove",
+                                                                    "DateTime": "@{utcNow()}",
+                                                                    "ErrorMessage": "",
+                                                                    "InvitationSent": "False",
+                                                                    "ObjectId": "@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}",
+                                                                    "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                }
+                                                            },
+                                                            "runAfter": {
+                                                                "Remove_user_from_DeltaLinkUsers_table": [
+                                                                    "Succeeded",
+                                                                    "Failed"
+                                                                ]
+                                                            },
+                                                            "type": "AppendToArrayVariable"
+                                                        },
+                                                        "Remove_external_user_from_Destination_tenant": {
+                                                            "inputs": {
+                                                                "authentication": {
+                                                                    "audience": "@variables('GraphAudienceURL')",
+                                                                    "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                                    "type": "ManagedServiceIdentity"
+                                                                },
+                                                                "method": "DELETE",
+                                                                "uri": "https://graph.microsoft.com/v1.0/users/@{first(body('Query_remote_user_in_Destination_tenant')?['value'])?['id']}"
+                                                            },
+                                                            "runAfter": {},
+                                                            "type": "Http"
+                                                        },
+                                                        "Remove_user_from_DeltaLinkUsers_table": {
+                                                            "inputs": {
+                                                                "host": {
+                                                                    "connection": {
+                                                                        "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                                                    }
+                                                                },
+                                                                "method": "delete",
+                                                                "path": "/Tables/@{encodeURIComponent('DeltaLinkUsers')}/entities/etag(PartitionKey='@{encodeURIComponent(triggerBody()?['TenantId'])}',RowKey='@{encodeURIComponent(items('Apply_to_each_-_User_in_Array')?['id'])}')"
+                                                            },
+                                                            "runAfter": {
+                                                                "Remove_external_user_from_Destination_tenant": [
+                                                                    "Succeeded"
+                                                                ]
+                                                            },
+                                                            "type": "ApiConnection"
+                                                        }
+                                                    },
+                                                    "description": "Don't try to remove external user account, if it doesn't exist in Destination tenant",
+                                                    "else": {
+                                                        "actions": {
+                                                            "Fill_Logging_array_after_skipped_removal_from_destination_tenant": {
+                                                                "inputs": {
+                                                                    "name": "LoggingArray",
+                                                                    "value": {
+                                                                        "Action": "IgnoreRemove",
+                                                                        "DateTime": "@{utcNow()}",
+                                                                        "ErrorMessage": "",
+                                                                        "InvitationSent": "False",
+                                                                        "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}",
+                                                                        "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                                    }
+                                                                },
+                                                                "runAfter": {},
+                                                                "type": "AppendToArrayVariable"
+                                                            }
+                                                        }
+                                                    },
+                                                    "expression": {
+                                                        "and": [
+                                                            {
+                                                                "greater": [
+                                                                    "@length(body('Query_remote_user_in_Destination_tenant')?['value'])",
+                                                                    0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "runAfter": {},
+                                                    "type": "If"
+                                                }
+                                            }
+                                        },
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "equals": [
+                                                        "@items('Apply_to_each_-_User_in_Array')?['@removed']?['reason']",
+                                                        null
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "runAfter": {
+                                            "Query_remote_user_in_Destination_tenant": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "If"
+                                    },
+                                    "Query_remote_user_in_Destination_tenant": {
+                                        "inputs": {
+                                            "authentication": {
+                                                "audience": "@variables('GraphAudienceURL')",
+                                                "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                "type": "ManagedServiceIdentity"
+                                            },
+                                            "method": "GET",
+                                            "uri": "https://graph.microsoft.com/v1.0/users?$filter=proxyaddresses/any(c:c+eq+'smtp:@{outputs('User_mail_in_remote_tenant')}')&$select=id,userPrincipalName,usertype,mail,creationType,GivenName,Surname"
+                                        },
+                                        "runAfter": {},
+                                        "type": "Http"
+                                    }
+                                },
+                                "else": {
+                                    "actions": {
+                                        "Log_information_about_skipped_user_account": {
+                                            "inputs": {
+                                                "name": "LoggingArray",
+                                                "value": {
+                                                    "Action": "IgnoreWrongMail",
+                                                    "DateTime": "@{utcNow()}",
+                                                    "ErrorMessage": "",
+                                                    "InvitationSent": "False",
+                                                    "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}",
+                                                    "UserMail": "@{outputs('User_mail_in_remote_tenant')}"
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "type": "AppendToArrayVariable"
+                                        }
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "not": {
+                                                "equals": [
+                                                    "@outputs('User_mail_in_remote_tenant')",
+                                                    "@null"
+                                                ]
+                                            }
+                                        },
+                                        {
+                                            "equals": [
+                                                "@contains(triggerBody()?['EmailDomain'],last(split(outputs('User_mail_in_remote_tenant'),'@')))",
+                                                "@true"
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {
+                                    "User_mail_in_remote_tenant": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "If"
+                            },
+                            "Get_user_from_remote_tenant": {
+                                "description": "Get users from sync group to check that they exists and are not external. Using non existing Id in filter cause this function to fail due to return code from Graph API",
+                                "inputs": {
+                                    "authentication": {
+                                        "audience": "@variables('GraphAudienceURL')",
+                                        "clientId": "@triggerBody()?['ApplicationId']",
+                                        "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                        "tenant": "@triggerBody()?['TenantId']",
+                                        "type": "ActiveDirectoryOAuth"
+                                    },
+                                    "method": "GET",
+                                    "uri": "https://graph.microsoft.com/v1.0/users?$filter=id eq '@{items('Apply_to_each_-_User_in_Array')?['id']}'&$select=id,userPrincipalName,usertype,mail,creationType,GivenName,Surname"
+                                },
+                                "runAfter": {},
+                                "type": "Http"
+                            },
+                            "Mail_attribute_in_remote_tenant_": {
+                                "inputs": "@if(empty(first(body('Get_user_from_remote_tenant')?['value'])?['mail']), null, first(body('Get_user_from_remote_tenant')?['value'])?['mail'])",
+                                "runAfter": {
+                                    "Get_user_from_remote_tenant": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "Compose"
+                            },
+                            "Mail_attribute_of_deleted_user_in_remote_tenant_": {
+                                "inputs": "@if(empty(first(body('Query_deleted_account_has_been_removed_from_remote_tenant')?['value'])?['mail']), null, first(body('Query_deleted_account_has_been_removed_from_remote_tenant')?['value'])?['mail'])",
+                                "runAfter": {
+                                    "Query_deleted_account_has_been_removed_from_remote_tenant": [
+                                        "Succeeded",
+                                        "Failed"
+                                    ]
+                                },
+                                "type": "Compose"
+                            },
+                            "Query_deleted_account_has_been_removed_from_remote_tenant": {
+                                "description": "Try to find deleted user object if previous query failed. This might be due to deletion of user object ",
+                                "inputs": {
+                                    "authentication": {
+                                        "audience": "@variables('GraphAudienceURL')",
+                                        "clientId": "@triggerBody()?['ApplicationId']",
+                                        "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                        "tenant": "@triggerBody()?['TenantId']",
+                                        "type": "ActiveDirectoryOAuth"
+                                    },
+                                    "method": "GET",
+                                    "uri": "https://graph.microsoft.com/v1.0/directory/deletedItems/microsoft.graph.user?$filter=id eq '@{items('Apply_to_each_-_User_in_Array')?['id']}'"
+                                },
+                                "runAfter": {
+                                    "Get_user_from_remote_tenant": [
+                                        "Failed"
+                                    ]
+                                },
+                                "type": "Http"
+                            },
+                            "User_mail_in_remote_tenant": {
+                                "inputs": "@coalesce(outputs('Mail_attribute_in_remote_tenant_'),outputs('Mail_attribute_of_deleted_user_in_remote_tenant_'))",
+                                "runAfter": {
+                                    "Mail_attribute_in_remote_tenant_": [
+                                        "Succeeded",
+                                        "Skipped"
+                                    ],
+                                    "Mail_attribute_of_deleted_user_in_remote_tenant_": [
+                                        "Succeeded",
+                                        "Skipped"
+                                    ]
+                                },
+                                "type": "Compose"
+                            }
+                        },
+                        "description": "For every user account in UsersArray check if it was added or removed from sync group. Inviting or deleting accounts in Destination tenant  based on this",
+                        "foreach": "@variables('UsersArray')",
+                        "runAfter": {
+                            "Do_Until_UsersArray_array_is_Empty": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 50
+                            }
+                        },
+                        "type": "Foreach"
+                    },
+                    "Do_Until_UsersArray_array_is_Empty": {
+                        "actions": {
+                            "Check_if_NextLink_contains_value_to_query_next_set_of_data": {
+                                "actions": {},
+                                "else": {
+                                    "actions": {
+                                        "HTTP_Get_next_data": {
+                                            "description": "Running query for Nextlink until all users are gathered from remote tenant",
+                                            "inputs": {
+                                                "authentication": {
+                                                    "audience": "@variables('GraphAudienceURL')",
+                                                    "clientId": "@triggerBody()?['ApplicationId']",
+                                                    "secret": "@body('Get_application_secret_for_remote_tenant_')?['value']",
+                                                    "tenant": "@triggerBody()?['TenantId']",
+                                                    "type": "ActiveDirectoryOAuth"
+                                                },
+                                                "method": "GET",
+                                                "uri": "@variables('NextLink')"
+                                            },
+                                            "runAfter": {},
+                                            "type": "Http"
+                                        },
+                                        "Parse_JSON_-_Next_Data": {
+                                            "inputs": {
+                                                "content": "@body('HTTP_Get_next_data')",
+                                                "schema": {
+                                                    "properties": {
+                                                        "@@odata.context": {
+                                                            "type": "string"
+                                                        },
+                                                        "@@odata.deltaLink": {
+                                                            "type": "string"
+                                                        },
+                                                        "@@odata.nextLink": {
+                                                            "type": "string"
+                                                        },
+                                                        "value": {
+                                                            "items": {
+                                                                "properties": {
+                                                                    "description": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "displayName": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "id": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "members@delta": {
+                                                                        "items": {
+                                                                            "properties": {
+                                                                                "@@odata.type": {
+                                                                                    "type": "string"
+                                                                                },
+                                                                                "@@removed": {
+                                                                                    "properties": {
+                                                                                        "reason": {
+                                                                                            "type": "string"
+                                                                                        }
+                                                                                    },
+                                                                                    "type": "object"
+                                                                                },
+                                                                                "id": {
+                                                                                    "type": "string"
+                                                                                }
+                                                                            },
+                                                                            "type": "object"
+                                                                        },
+                                                                        "type": "array"
+                                                                    }
+                                                                },
+                                                                "type": "object"
+                                                            },
+                                                            "type": "array"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "HTTP_Get_next_data": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ParseJson"
+                                        },
+                                        "Set_variable_DeltaLink_Loop": {
+                                            "inputs": {
+                                                "name": "DeltaLink",
+                                                "value": "@body('Parse_JSON_-_Next_Data')?['@odata.deltaLink']"
+                                            },
+                                            "runAfter": {
+                                                "Parse_JSON_-_Next_Data": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable"
+                                        }
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@length(variables('NextLink'))",
+                                                0
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {},
+                                "type": "If"
+                            },
+                            "Set_variable_NextLink_Loop": {
+                                "inputs": {
+                                    "name": "NextLink",
+                                    "value": "@body('Parse_JSON_-_Next_Data')?['@odata.nextLink']"
+                                },
+                                "runAfter": {
+                                    "Check_if_NextLink_contains_value_to_query_next_set_of_data": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "SetVariable"
+                            },
+                            "User_still_exist_in_the_last_query": {
+                                "actions": {
+                                    "Append_new_user_list_to_Users_Array": {
+                                        "inputs": "@union(variables('UsersArray'),First(body('Parse_JSON_-_Next_Data')?['value'])?['members@delta'])",
+                                        "runAfter": {},
+                                        "type": "Compose"
+                                    },
+                                    "Append_to_array_variable_Users_Array": {
+                                        "inputs": {
+                                            "name": "UsersArray",
+                                            "value": "@body('Filter_group_members_to_include_only_user_accounts_2')"
+                                        },
+                                        "runAfter": {
+                                            "Filter_group_members_to_include_only_user_accounts_2": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "SetVariable"
+                                    },
+                                    "Filter_group_members_to_include_only_user_accounts_2": {
+                                        "description": "Nested groups in Azure AD seems to be possible now",
+                                        "inputs": {
+                                            "from": "@outputs('Append_new_user_list_to_Users_Array')",
+                                            "where": "@equals(item()?['@odata.type'], '#microsoft.graph.user')"
+                                        },
+                                        "runAfter": {
+                                            "Append_new_user_list_to_Users_Array": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Query"
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@empty(body('Parse_JSON_-_Next_Data')?['value'])",
+                                                false
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {
+                                    "Set_variable_NextLink_Loop": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "If"
+                            }
+                        },
+                        "description": "This loop is to query all users using delta queries. It works while Next link query returns user accounts, these accounts are written to UserArray",
+                        "expression": "@empty(body('Parse_JSON_-_Next_Data')?['value'])",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT1H"
+                        },
+                        "runAfter": {
+                            "Set_variable_UsersArray": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Until"
+                    },
+                    "Filter_group_members_to_include_only_user_accounts": {
+                        "description": "Azure AD finally supports nested groups?",
+                        "inputs": {
+                            "from": "@if(empty(body('Parse_JSON_Group_Members')?['value']), First(body('Parse_JSON_Group_Members_DeltaLink_query')?['value'])?['members@delta'], First(body('Parse_JSON_Group_Members')?['value'])?['members@delta'])",
+                            "where": "@equals(item()?['@odata.type'], '#microsoft.graph.user')"
+                        },
+                        "runAfter": {},
+                        "type": "Query"
+                    },
+                    "Response_no_members_property_returned_": {
+                        "inputs": {
+                            "body": {
+                                "Action": "WorkflowError",
+                                "DateTime": "@{utcNow()}",
+                                "ErrorMessage": "Graph API output doesn't contain members property",
+                                "InvitationSent": "",
+                                "ObjectId": "",
+                                "UserMail": ""
+                            },
+                            "statusCode": 200
+                        },
+                        "kind": "Http",
+                        "runAfter": {
+                            "Filter_group_members_to_include_only_user_accounts": [
+                                "Failed"
+                            ]
+                        },
+                        "type": "Response"
+                    },
+                    "Set_variable_UsersArray": {
+                        "inputs": {
+                            "name": "UsersArray",
+                            "value": "@body('Filter_group_members_to_include_only_user_accounts')"
+                        },
+                        "runAfter": {
+                            "Filter_group_members_to_include_only_user_accounts": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    }
+                },
+                "description": "Main condition to check if there were user membership changes in sync group ",
+                "expression": {
+                    "or": [
+                        {
+                            "equals": [
+                                "@empty(body('Parse_JSON_Group_Members')?['value'])",
+                                false
+                            ]
+                        },
+                        {
+                            "equals": [
+                                "@empty(body('Parse_JSON_Group_Members_DeltaLink_query')?['value'])",
+                                false
+                            ]
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "DeltaLink_for_sync_group_exists_in_storage_table": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "manual": {
+                "inputs": {
+                    "schema": {
+                        "properties": {
+                            "ApplicationId": {
+                                "type": "string"
+                            },
+                            "CustomizedMessageBody": {
+                                "type": "string"
+                            },
+                            "DisplayName": {
+                                "type": "string"
+                            },
+                            "EmailDomain": {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            "GroupId": {
+                                "type": "string"
+                            },
+                            "InvitedUserType": {
+                                "type": "string"
+                            },
+                            "KeyVaultURL": {
+                                "type": "string"
+                            },
+                            "SendInvitationMessage": {
+                                "type": "boolean"
+                            },
+                            "TenantId": {
+                                "type": "string"
+                            },
+                            "inviteRedirectUrl": {
+                                "type": "string"
+                            }
+                        },
+                        "type": "object"
+                    }
+                },
+                "kind": "Http",
+                "type": "Request"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "value": {
+                "azuretables": {
+                    "connectionId": "/subscriptions/<subscriptionid>/resourceGroups/<resource_Group_ID>/providers/Microsoft.Web/connections/azuretables",
+                    "connectionName": "azuretables",
+                    "id": "/subscriptions/<subscriptionid>/providers/Microsoft.Web/locations/westeurope/managedApis/azuretables"
+                }
+            }
+        }
+    }
+}
