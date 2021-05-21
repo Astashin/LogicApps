@@ -1,0 +1,1189 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "actions": {
+            "Check_if_DeltaLink_is_not_empty": {
+                "actions": {
+                    "Check_if_DeltaLink_is_already_stored": {
+                        "actions": {
+                            "Insert_new_DeltaLink_to_DeltaLinkGroups_table": {
+                                "inputs": {
+                                    "body": {
+                                        "DeltaLink": "@{variables('DeltaLink')}",
+                                        "PartitionKey": "@{triggerBody()?['AdminUnitId']}",
+                                        "RowKey": "@{triggerBody()?['GroupId']}"
+                                    },
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuretables_1']['connectionId']"
+                                        }
+                                    },
+                                    "method": "post",
+                                    "path": "/Tables/@{encodeURIComponent('DeltaLinkGroups')}/entities"
+                                },
+                                "runAfter": {},
+                                "type": "ApiConnection"
+                            }
+                        },
+                        "description": "True if DeltaLink is not yet stored (first query)",
+                        "else": {
+                            "actions": {
+                                "Try_to_replace_new_DeltaLink_in_DeltaLinkGroups_table": {
+                                    "description": "We try to replace entry first using GroupId as RowKey. If operation fails we assume it doesn't exist and add a new entry ",
+                                    "inputs": {
+                                        "body": {
+                                            "DeltaLink": "@{variables('DeltaLink')}"
+                                        },
+                                        "headers": {
+                                            "If-Match": "*"
+                                        },
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuretables_1']['connectionId']"
+                                            }
+                                        },
+                                        "method": "put",
+                                        "path": "/Tables/@{encodeURIComponent('DeltaLinkGroups')}/entities/etag(PartitionKey='@{encodeURIComponent(triggerBody()?['AdminUnitId'])}',RowKey='@{encodeURIComponent(triggerBody()?['GroupId'])}')"
+                                    },
+                                    "runAfter": {},
+                                    "type": "ApiConnection"
+                                }
+                            }
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "equals": [
+                                        "@length(body('Query_existing_DeltaLink_in_DeltaLinkGroups_table')?['value'])",
+                                        0
+                                    ]
+                                }
+                            ]
+                        },
+                        "runAfter": {
+                            "Query_existing_DeltaLink_in_DeltaLinkGroups_table": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "If"
+                    },
+                    "Error_adding_new_delta_link_information_to_logging_array": {
+                        "inputs": {
+                            "name": "LoggingArray",
+                            "value": {
+                                "Action": "New DeltaLink",
+                                "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                "DateTime": "@{utcNow()}",
+                                "ErrorMessage": "Error saving Delta link",
+                                "GroupId": "@{triggerBody()?['GroupId']}"
+                            }
+                        },
+                        "runAfter": {
+                            "Check_if_DeltaLink_is_already_stored": [
+                                "Failed",
+                                "TimedOut"
+                            ]
+                        },
+                        "type": "AppendToArrayVariable"
+                    },
+                    "Query_existing_DeltaLink_in_DeltaLinkGroups_table": {
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['azuretables_1']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/Tables/@{encodeURIComponent('DeltaLinkGroups')}/entities",
+                            "queries": {
+                                "$filter": "RowKey eq '@{triggerBody()?['GroupId']}' and PartitionKey eq '@{triggerBody()?['AdminUnitId']}'"
+                            }
+                        },
+                        "runAfter": {},
+                        "type": "ApiConnection"
+                    }
+                },
+                "expression": {
+                    "and": [
+                        {
+                            "not": {
+                                "equals": [
+                                    "@length(variables('DeltaLink'))",
+                                    0
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Users_exist_in_DeltaLink_or_NextLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            },
+            "DeltaLink_for_sync_group_exists_in_storage_table": {
+                "actions": {
+                    "Parse_JSON_Group_Members_DeltaLink_query": {
+                        "inputs": {
+                            "content": "@body('Run_query_using_DeltaLink')",
+                            "schema": {
+                                "properties": {
+                                    "@@odata.context": {
+                                        "type": "string"
+                                    },
+                                    "@@odata.deltaLink": {
+                                        "type": "string"
+                                    },
+                                    "@@odata.nextLink": {
+                                        "type": "string"
+                                    },
+                                    "value": {
+                                        "items": {
+                                            "properties": {
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "displayName": {
+                                                    "type": "string"
+                                                },
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "members@delta": {
+                                                    "items": {
+                                                        "properties": {
+                                                            "@@odata.type": {
+                                                                "type": "string"
+                                                            },
+                                                            "@@removed": {
+                                                                "properties": {
+                                                                    "reason": {
+                                                                        "type": "string"
+                                                                    }
+                                                                },
+                                                                "type": "object"
+                                                            },
+                                                            "id": {
+                                                                "type": "string"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "type": "array"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": "array"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        },
+                        "runAfter": {
+                            "Run_query_using_DeltaLink": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "ParseJson"
+                    },
+                    "Run_query_using_DeltaLink": {
+                        "inputs": {
+                            "authentication": {
+                                "audience": "@variables('GraphAudienceURL')",
+                                "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                "type": "ManagedServiceIdentity"
+                            },
+                            "method": "GET",
+                            "uri": "@{first(body('Get_Delta_query_link_from_DeltaQueriesGroups_table')?['value'])?['DeltaLink']}"
+                        },
+                        "runAfter": {},
+                        "type": "Http"
+                    },
+                    "Set_variable_DeltaLink_after_DeltaLink_query": {
+                        "inputs": {
+                            "name": "DeltaLink",
+                            "value": "@body('Parse_JSON_Group_Members_DeltaLink_query')?['@odata.deltaLink']"
+                        },
+                        "runAfter": {
+                            "Set_variable_NextLink_after_DeltaLink_query": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    },
+                    "Set_variable_NextLink_after_DeltaLink_query": {
+                        "inputs": {
+                            "name": "NextLink",
+                            "value": "@body('Parse_JSON_Group_Members_DeltaLink_query')?['@odata.nextLink']"
+                        },
+                        "runAfter": {
+                            "Parse_JSON_Group_Members_DeltaLink_query": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    }
+                },
+                "description": "True if DeltaLink is found",
+                "else": {
+                    "actions": {
+                        "Parse_JSON_Group_Members": {
+                            "inputs": {
+                                "content": "@body('Run_initial_query_and_get_DeltaToken')",
+                                "schema": {
+                                    "properties": {
+                                        "@@odata.context": {
+                                            "type": "string"
+                                        },
+                                        "@@odata.deltaLink": {
+                                            "type": "string"
+                                        },
+                                        "@@odata.nextLink": {
+                                            "type": "string"
+                                        },
+                                        "value": {
+                                            "items": {
+                                                "properties": {
+                                                    "description": {
+                                                        "type": "string"
+                                                    },
+                                                    "displayName": {
+                                                        "type": "string"
+                                                    },
+                                                    "id": {
+                                                        "type": "string"
+                                                    },
+                                                    "members@delta": {
+                                                        "items": {
+                                                            "properties": {
+                                                                "@@odata.type": {
+                                                                    "type": "string"
+                                                                },
+                                                                "@@removed": {
+                                                                    "properties": {
+                                                                        "reason": {
+                                                                            "type": "string"
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                },
+                                                                "id": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "type": "object"
+                                                        },
+                                                        "type": "array"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            },
+                                            "type": "array"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            },
+                            "runAfter": {
+                                "Wait_for_Graph_API_replication_completes": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ParseJson"
+                        },
+                        "Run_initial_query_and_get_DeltaToken": {
+                            "inputs": {
+                                "authentication": {
+                                    "audience": "@variables('GraphAudienceURL')",
+                                    "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                    "type": "ManagedServiceIdentity"
+                                },
+                                "method": "GET",
+                                "uri": "https://graph.microsoft.com/v1.0/groups/delta?$select=members&$filter=id eq '@{triggerBody()?['GroupId']}'"
+                            },
+                            "runAfter": {},
+                            "type": "Http"
+                        },
+                        "Set_variable_DeltaLink": {
+                            "inputs": {
+                                "name": "DeltaLink",
+                                "value": "@body('Parse_JSON_Group_Members')?['@odata.deltaLink']"
+                            },
+                            "runAfter": {
+                                "Set_variable_NextLink": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "SetVariable"
+                        },
+                        "Set_variable_NextLink": {
+                            "inputs": {
+                                "name": "NextLink",
+                                "value": "@body('Parse_JSON_Group_Members')?['@odata.nextLink']"
+                            },
+                            "runAfter": {
+                                "Parse_JSON_Group_Members": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "SetVariable"
+                        },
+                        "Wait_for_Graph_API_replication_completes": {
+                            "inputs": {
+                                "interval": {
+                                    "count": 5,
+                                    "unit": "Second"
+                                }
+                            },
+                            "runAfter": {
+                                "Run_initial_query_and_get_DeltaToken": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Wait"
+                        }
+                    }
+                },
+                "expression": {
+                    "and": [
+                        {
+                            "greater": [
+                                "@length(body('Get_Delta_query_link_from_DeltaQueriesGroups_table')?['value'])",
+                                0
+                            ]
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Get_Delta_query_link_from_DeltaQueriesGroups_table": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            },
+            "Final_Response_for_parent_workflow": {
+                "inputs": {
+                    "body": "@variables('LoggingArray')",
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Check_if_DeltaLink_is_not_empty": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Get_Delta_query_link_from_DeltaQueriesGroups_table": {
+                "description": "Search for existing Delta query for of sync group in the table",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables_1']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/Tables/@{encodeURIComponent('DeltaLinkGroups')}/entities",
+                    "queries": {
+                        "$filter": "RowKey eq '@{triggerBody()?['GroupId']}' and PartitionKey eq '@{triggerBody()?['AdminUnitId']}'",
+                        "$select": "DeltaLink"
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variable_AdminUnitUsersArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection"
+            },
+            "Initialize_variable_AdminUnitUsersArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "AdminUnitUsersArray",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_NextLinkAdminUnit": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_DeltaLink": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "DeltaLink",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_NextLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_GraphAudienceURL": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "GraphAudienceURL",
+                            "type": "string",
+                            "value": "https://graph.microsoft.com"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_KeyVaultURL": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_KeyVaultURL": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "KeyVaultURL",
+                            "type": "string",
+                            "value": "@{triggerBody()?['KeyVaultURL']}"
+                        }
+                    ]
+                },
+                "runAfter": {},
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_LoggingArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "LoggingArray",
+                            "type": "array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_UserMailInRemoteTenant": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_NextLink": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "NextLink",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_GraphAudienceURL": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_NextLinkAdminUnit": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "NextLinkAdminUnit",
+                            "type": "string",
+                            "value": "https://graph.microsoft.com/beta/administrativeUnits/@{triggerBody()?['AdminUnitId']}/members?$select=id"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_LoggingArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_UserMailInRemoteTenant": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "UserMailInRemoteTenant",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_UsersArray": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Initialize_variable_UsersArray": {
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "UsersArray",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_variable_DeltaLink": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable"
+            },
+            "Response_Error_executing_Graph_API_delta_query": {
+                "inputs": {
+                    "body": [
+                        {
+                            "Action": "Workflow Error",
+                            "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                            "DateTime": "@{utcNow()}",
+                            "ErrorMessage": "Error executing Graph API delta query",
+                            "GroupId": "@{triggerBody()?['GroupId']}"
+                        }
+                    ],
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "DeltaLink_for_sync_group_exists_in_storage_table": [
+                        "Skipped",
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Response_Error_querying_DeltaQueriesGroups_table": {
+                "inputs": {
+                    "body": [
+                        {
+                            "Action": "Workflow Error",
+                            "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                            "DateTime": "@{utcNow()}",
+                            "ErrorMessage": "Error querying DeltaQueriesGroups table",
+                            "GroupId": "@{triggerBody()?['GroupId']}"
+                        }
+                    ],
+                    "statusCode": 200
+                },
+                "kind": "Http",
+                "runAfter": {
+                    "Get_Delta_query_link_from_DeltaQueriesGroups_table": [
+                        "Failed",
+                        "TimedOut"
+                    ]
+                },
+                "type": "Response"
+            },
+            "Users_exist_in_DeltaLink_or_NextLink": {
+                "actions": {
+                    "Apply_to_each_-_User_in_Array": {
+                        "actions": {
+                            "Check_if_new_user_is_added_or_removed_to_group": {
+                                "actions": {
+                                    "Check_if_user_doesn't_exist_in_AU": {
+                                        "actions": {
+                                            "Add_user_to_AU": {
+                                                "inputs": {
+                                                    "authentication": {
+                                                        "audience": "@variables('GraphAudienceURL')",
+                                                        "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                        "type": "ManagedServiceIdentity"
+                                                    },
+                                                    "body": {
+                                                        "@@odata.id": "https://graph.microsoft.com/beta/users/@{items('Apply_to_each_-_User_in_Array')?['id']}"
+                                                    },
+                                                    "method": "POST",
+                                                    "uri": "https://graph.microsoft.com/beta/administrativeUnits/@{triggerBody()?['AdminUnitId']}/members/$ref"
+                                                },
+                                                "runAfter": {},
+                                                "type": "Http"
+                                            },
+                                            "Log_error_when_adding_of_a_new_user_to_AU": {
+                                                "inputs": {
+                                                    "name": "LoggingArray",
+                                                    "value": {
+                                                        "Action": "Add User",
+                                                        "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                                        "DateTime": "@{utcNow()}",
+                                                        "ErrorMessage": "Error adding user object to AU @{triggerBody()?['AUDisplayName']}",
+                                                        "GroupId": "@{triggerBody()?['GroupId']}",
+                                                        "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Add_user_to_AU": [
+                                                        "Failed",
+                                                        "TimedOut"
+                                                    ]
+                                                },
+                                                "type": "AppendToArrayVariable"
+                                            },
+                                            "Log_successful_adding_of_new_user_to_AU": {
+                                                "inputs": {
+                                                    "name": "LoggingArray",
+                                                    "value": {
+                                                        "Action": "Add User",
+                                                        "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                                        "DateTime": "@{utcNow()}",
+                                                        "ErrorMessage": "User object successfully added to AU @{triggerBody()?['AUDisplayName']}",
+                                                        "GroupId": "@{triggerBody()?['GroupId']}",
+                                                        "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Add_user_to_AU": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "AppendToArrayVariable"
+                                            }
+                                        },
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "not": {
+                                                        "contains": [
+                                                            "@string(variables('AdminUnitUsersArray'))",
+                                                            "@items('Apply_to_each_-_User_in_Array')?['id']"
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        "runAfter": {},
+                                        "type": "If"
+                                    }
+                                },
+                                "else": {
+                                    "actions": {
+                                        "Check_if_user_exists_in_AU": {
+                                            "actions": {
+                                                "Delete_user_from_AU": {
+                                                    "inputs": {
+                                                        "authentication": {
+                                                            "audience": "@variables('GraphAudienceURL')",
+                                                            "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                            "type": "ManagedServiceIdentity"
+                                                        },
+                                                        "method": "DELETE",
+                                                        "uri": "https://graph.microsoft.com/beta/administrativeUnits/@{triggerBody()?['AdminUnitId']}/members/@{items('Apply_to_each_-_User_in_Array')?['id']}/$ref"
+                                                    },
+                                                    "runAfter": {},
+                                                    "type": "Http"
+                                                },
+                                                "Log_failed_removal_of_user_account_from_AU": {
+                                                    "inputs": {
+                                                        "name": "LoggingArray",
+                                                        "value": {
+                                                            "Action": "Remove User",
+                                                            "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                                            "DateTime": "@{utcNow()}",
+                                                            "ErrorMessage": "Error removing user object from AU @{triggerBody()?['AUDisplayName']}",
+                                                            "GroupId": "@{triggerBody()?['GroupId']}",
+                                                            "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Delete_user_from_AU": [
+                                                            "Failed",
+                                                            "TimedOut"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                },
+                                                "Log_successful_removal_of_user_account_from_AU": {
+                                                    "inputs": {
+                                                        "name": "LoggingArray",
+                                                        "value": {
+                                                            "Action": "Remove User",
+                                                            "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                                            "DateTime": "@{utcNow()}",
+                                                            "ErrorMessage": "User object successfully removed from AU @{triggerBody()?['AUDisplayName']}",
+                                                            "GroupId": "@{triggerBody()?['GroupId']}",
+                                                            "ObjectId": "@{items('Apply_to_each_-_User_in_Array')?['id']}"
+                                                        }
+                                                    },
+                                                    "runAfter": {
+                                                        "Delete_user_from_AU": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "AppendToArrayVariable"
+                                                }
+                                            },
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "contains": [
+                                                            "@string(variables('AdminUnitUsersArray'))",
+                                                            "@items('Apply_to_each_-_User_in_Array')?['id']"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "runAfter": {},
+                                            "type": "If"
+                                        }
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@items('Apply_to_each_-_User_in_Array')?['@removed']?['reason']",
+                                                null
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {},
+                                "type": "If"
+                            }
+                        },
+                        "foreach": "@variables('UsersArray')",
+                        "runAfter": {
+                            "Do_Until_UsersArray_array_is_Empty": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 1
+                            }
+                        },
+                        "type": "Foreach"
+                    },
+                    "Do_Until_UsersArray_array_is_Empty": {
+                        "actions": {
+                            "Check_if_NextLink_contains_value_to_query_next_set_of_data": {
+                                "actions": {},
+                                "else": {
+                                    "actions": {
+                                        "HTTP_Get_next_data": {
+                                            "description": "Running query for Nextlink until all users are gathered from remote tenant",
+                                            "inputs": {
+                                                "authentication": {
+                                                    "audience": "@variables('GraphAudienceURL')",
+                                                    "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                                    "type": "ManagedServiceIdentity"
+                                                },
+                                                "method": "GET",
+                                                "uri": "@variables('NextLink')"
+                                            },
+                                            "runAfter": {},
+                                            "type": "Http"
+                                        },
+                                        "Parse_JSON_-_Next_Data": {
+                                            "inputs": {
+                                                "content": "@body('HTTP_Get_next_data')",
+                                                "schema": {
+                                                    "properties": {
+                                                        "@@odata.context": {
+                                                            "type": "string"
+                                                        },
+                                                        "@@odata.deltaLink": {
+                                                            "type": "string"
+                                                        },
+                                                        "@@odata.nextLink": {
+                                                            "type": "string"
+                                                        },
+                                                        "value": {
+                                                            "items": {
+                                                                "properties": {
+                                                                    "description": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "displayName": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "id": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "members@delta": {
+                                                                        "items": {
+                                                                            "properties": {
+                                                                                "@@odata.type": {
+                                                                                    "type": "string"
+                                                                                },
+                                                                                "@@removed": {
+                                                                                    "properties": {
+                                                                                        "reason": {
+                                                                                            "type": "string"
+                                                                                        }
+                                                                                    },
+                                                                                    "type": "object"
+                                                                                },
+                                                                                "id": {
+                                                                                    "type": "string"
+                                                                                }
+                                                                            },
+                                                                            "type": "object"
+                                                                        },
+                                                                        "type": "array"
+                                                                    }
+                                                                },
+                                                                "type": "object"
+                                                            },
+                                                            "type": "array"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "HTTP_Get_next_data": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ParseJson"
+                                        },
+                                        "Set_variable_DeltaLink_Loop": {
+                                            "inputs": {
+                                                "name": "DeltaLink",
+                                                "value": "@body('Parse_JSON_-_Next_Data')?['@odata.deltaLink']"
+                                            },
+                                            "runAfter": {
+                                                "Parse_JSON_-_Next_Data": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "SetVariable"
+                                        }
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@length(variables('NextLink'))",
+                                                0
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {},
+                                "type": "If"
+                            },
+                            "Set_variable_NextLink_Loop": {
+                                "inputs": {
+                                    "name": "NextLink",
+                                    "value": "@body('Parse_JSON_-_Next_Data')?['@odata.nextLink']"
+                                },
+                                "runAfter": {
+                                    "Check_if_NextLink_contains_value_to_query_next_set_of_data": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "SetVariable"
+                            },
+                            "User_still_exist_in_the_last_query": {
+                                "actions": {
+                                    "Append_new_user_list_to_Users_Array": {
+                                        "inputs": "@union(variables('UsersArray'),First(body('Parse_JSON_-_Next_Data')?['value'])?['members@delta'])",
+                                        "runAfter": {},
+                                        "type": "Compose"
+                                    },
+                                    "Append_to_array_variable_Users_Array": {
+                                        "inputs": {
+                                            "name": "UsersArray",
+                                            "value": "@body('Filter_group_members_to_include_only_user_accounts_2')"
+                                        },
+                                        "runAfter": {
+                                            "Filter_group_members_to_include_only_user_accounts_2": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "SetVariable"
+                                    },
+                                    "Filter_group_members_to_include_only_user_accounts_2": {
+                                        "description": "Nested groups in Azure AD seems to be possible now",
+                                        "inputs": {
+                                            "from": "@outputs('Append_new_user_list_to_Users_Array')",
+                                            "where": "@equals(item()?['@odata.type'], '#microsoft.graph.user')"
+                                        },
+                                        "runAfter": {
+                                            "Append_new_user_list_to_Users_Array": [
+                                                "Succeeded"
+                                            ]
+                                        },
+                                        "type": "Query"
+                                    }
+                                },
+                                "expression": {
+                                    "and": [
+                                        {
+                                            "equals": [
+                                                "@empty(body('Parse_JSON_-_Next_Data')?['value'])",
+                                                false
+                                            ]
+                                        }
+                                    ]
+                                },
+                                "runAfter": {
+                                    "Set_variable_NextLink_Loop": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "If"
+                            }
+                        },
+                        "description": "This loop is to query all users using delta queries. It works while Next link query returns user accounts, these accounts are written to UserArray",
+                        "expression": "@empty(body('Parse_JSON_-_Next_Data')?['value'])",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT1H"
+                        },
+                        "runAfter": {
+                            "Populating_AdminUnitUsers_array": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Until"
+                    },
+                    "Filter_group_members_to_include_only_user_accounts": {
+                        "description": "Azure AD finally supports nested groups?",
+                        "inputs": {
+                            "from": "@if(empty(body('Parse_JSON_Group_Members')?['value']), First(body('Parse_JSON_Group_Members_DeltaLink_query')?['value'])?['members@delta'], First(body('Parse_JSON_Group_Members')?['value'])?['members@delta'])",
+                            "where": "@equals(item()?['@odata.type'], '#microsoft.graph.user')"
+                        },
+                        "runAfter": {},
+                        "type": "Query"
+                    },
+                    "Populating_AdminUnitUsers_array": {
+                        "actions": {
+                            "Merge_values_in_AdminUnitUsers_array_with_new_data_": {
+                                "inputs": {
+                                    "name": "AdminUnitUsersArray",
+                                    "value": "@outputs('Union_values_in_AdminUnitUsers_array_with_new_data_')"
+                                },
+                                "runAfter": {
+                                    "Union_values_in_AdminUnitUsers_array_with_new_data_": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "SetVariable"
+                            },
+                            "Parse_users_list_from_AU": {
+                                "inputs": {
+                                    "content": "@body('Query_list_of_users_in_Admin_Unit')",
+                                    "schema": {
+                                        "properties": {
+                                            "@@odata.context": {
+                                                "type": "string"
+                                            },
+                                            "@@odata.nextLink": {
+                                                "type": "string"
+                                            },
+                                            "value": {
+                                                "items": {
+                                                    "properties": {
+                                                        "@@odata.type": {
+                                                            "type": "string"
+                                                        },
+                                                        "id": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "@@odata.type",
+                                                        "id"
+                                                    ],
+                                                    "type": "object"
+                                                },
+                                                "type": "array"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Query_list_of_users_in_Admin_Unit": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ParseJson"
+                            },
+                            "Query_list_of_users_in_Admin_Unit": {
+                                "inputs": {
+                                    "authentication": {
+                                        "audience": "@variables('GraphAudienceURL')",
+                                        "identity": "/subscriptions/<subscriptionid>/resourcegroups/<resource_Group_ID>/providers/microsoft.managedidentity/userassignedidentities/azure-ad-automation-msi",
+                                        "type": "ManagedServiceIdentity"
+                                    },
+                                    "method": "GET",
+                                    "uri": "@variables('NextLinkAdminUnit')"
+                                },
+                                "runAfter": {},
+                                "type": "Http"
+                            },
+                            "Set_NextLinkAdminUnit_variable": {
+                                "inputs": {
+                                    "name": "NextLinkAdminUnit",
+                                    "value": "@body('Parse_users_list_from_AU')?['@odata.nextLink']"
+                                },
+                                "runAfter": {
+                                    "Merge_values_in_AdminUnitUsers_array_with_new_data_": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "SetVariable"
+                            },
+                            "Union_values_in_AdminUnitUsers_array_with_new_data_": {
+                                "inputs": "@union(body('Parse_users_list_from_AU')?['value'], variables('AdminUnitUsersArray'))",
+                                "runAfter": {
+                                    "Parse_users_list_from_AU": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "Compose"
+                            }
+                        },
+                        "expression": "@equals(variables('NextLinkAdminUnit'), '')",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT1H"
+                        },
+                        "runAfter": {
+                            "Set_variable_UsersArray": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "Until"
+                    },
+                    "Response_error_when_query_AU": {
+                        "inputs": {
+                            "body": [
+                                {
+                                    "Action": "Workflow Error",
+                                    "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                    "DateTime": "@{utcNow()}",
+                                    "ErrorMessage": "Error querying AU @{triggerBody()?['AUDisplayName']}",
+                                    "GroupId": "@{triggerBody()?['GroupId']}"
+                                }
+                            ],
+                            "statusCode": 200
+                        },
+                        "kind": "Http",
+                        "runAfter": {
+                            "Populating_AdminUnitUsers_array": [
+                                "Failed",
+                                "TimedOut"
+                            ]
+                        },
+                        "type": "Response"
+                    },
+                    "Response_no_members_property_returned_": {
+                        "inputs": {
+                            "body": [
+                                {
+                                    "Action": "Workflow Error",
+                                    "AdminUnitId": "@{triggerBody()?['AdminUnitId']}",
+                                    "DateTime": "@{utcNow()}",
+                                    "ErrorMessage": "Graph API output doesn't contain members property",
+                                    "GroupId": "@{triggerBody()?['GroupId']}"
+                                }
+                            ],
+                            "statusCode": 200
+                        },
+                        "kind": "Http",
+                        "runAfter": {
+                            "Filter_group_members_to_include_only_user_accounts": [
+                                "Failed"
+                            ]
+                        },
+                        "type": "Response"
+                    },
+                    "Set_variable_UsersArray": {
+                        "inputs": {
+                            "name": "UsersArray",
+                            "value": "@body('Filter_group_members_to_include_only_user_accounts')"
+                        },
+                        "runAfter": {
+                            "Filter_group_members_to_include_only_user_accounts": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "SetVariable"
+                    }
+                },
+                "description": "Main condition to check if there were user membership changes in sync group ",
+                "expression": {
+                    "or": [
+                        {
+                            "equals": [
+                                "@empty(body('Parse_JSON_Group_Members')?['value'])",
+                                false
+                            ]
+                        },
+                        {
+                            "equals": [
+                                "@empty(body('Parse_JSON_Group_Members_DeltaLink_query')?['value'])",
+                                false
+                            ]
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "DeltaLink_for_sync_group_exists_in_storage_table": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "If"
+            }
+        },
+        "contentVersion": "1.0.0.0",
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "defaultValue": {},
+                "type": "Object"
+            }
+        },
+        "triggers": {
+            "manual": {
+                "inputs": {
+                    "schema": {
+                        "properties": {
+                            "AUDisplayName": {
+                                "type": "string"
+                            },
+                            "AdminUnitId": {
+                                "type": "string"
+                            },
+                            "GroupId": {
+                                "type": "string"
+                            }
+                        },
+                        "type": "object"
+                    }
+                },
+                "kind": "Http",
+                "type": "Request"
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "value": {
+                "azuretables_1": {
+                    "connectionId": "/subscriptions/<subscriptionid>/resourceGroups/<resource_Group_ID>/providers/Microsoft.Web/connections/azuretables-1",
+                    "connectionName": "azuretables-1",
+                    "id": "/subscriptions/<subscriptionid>/providers/Microsoft.Web/locations/westeurope/managedApis/azuretables"
+                }
+            }
+        }
+    }
+}
