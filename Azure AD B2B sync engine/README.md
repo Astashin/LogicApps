@@ -4,6 +4,8 @@
 - Attribute sync worker – performs synchronization of user object attributes from source to destination tenant
 - Main workflow – triggered by scheduler and starts two sync workers above. Writes logging information to storage table
 
+![High-level](https://blog.astashin.com/assets/img/2021/2021-05-06/LogicAppsHLD.png)
+
 Full description is in this blog articles:
 1. [Overview](https://blog.astashin.com/blog/Bring-em-all-in-p5/)
 2. [Low-level design](https://blog.astashin.com/blog/Bring-em-all-in-p6/)
